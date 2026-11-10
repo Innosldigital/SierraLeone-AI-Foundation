@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
     api_debug: bool = False
     cors_origins: list[str] = Field(default_factory=list)
+    max_audio_upload_bytes: int = 10 * 1024 * 1024  # 10 MB default upload cap (SLAI-027)
 
     # Safety gate – prevents accidental expensive training
     allow_training: bool = False

@@ -1,9 +1,10 @@
-"""Pydantic models for the API request/response layer."""
+"""Pydantic models for the API request/response layer (SLAI-012 / SLAI-027)."""
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
 from sierraleone_ai import SUPPORTED_LANGUAGES
+from sierraleone_ai.datasets.schema import Language
 
 # Valid language codes for field-level documentation
 _LANG_CODES = sorted(SUPPORTED_LANGUAGES.keys())
@@ -66,8 +67,8 @@ class TranscribeResponse(BaseModel):
 
 class SynthesizeRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4096)
-    language: str = Field(
-        "krio",
+    language: Language = Field(
+        Language.KRIO,
         description=f"Target language code for speech synthesis. Supported: {_LANG_CODES}",
     )
 

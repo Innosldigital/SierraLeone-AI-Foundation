@@ -48,3 +48,63 @@ class TestConfigSecrets:
     def test_allow_training_defaults_false(self):
         from sierraleone_ai.config import settings
         assert settings.allow_training is False
+
+    def test_pyproject_optional_dependencies_uncommented(self):
+        """SLAI-015: [project.optional-dependencies] groups training, audio, eval, data, dev are non-empty."""
+        from pathlib import Path
+
+        import tomllib
+
+        pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        opt_deps = data["project"]["optional-dependencies"]
+        for group in ("training", "audio", "eval", "data", "dev"):
+            assert group in opt_deps, f"Missing optional-dependencies group '{group}'"
+            assert len(opt_deps[group]) >= 1, f"Optional dependency group '{group}' is empty"
+
+    def test_language_registry_matches_schema_enum_and_benchmark_dirs(self):
+        """SLAI-028 / SLAI-018: Single language registry matches Language enum and lowercase benchmark dirs."""
+        from pathlib import Path
+
+        from sierraleone_ai import LANGUAGE_REGISTRY, SUPPORTED_LANGUAGES
+        from sierraleone_ai.datasets.schema import Language
+
+        enum_values = {lang.value for lang in Language if lang.value != "other"}
+        assert set(LANGUAGE_REGISTRY.keys()) == enum_values
+        assert set(SUPPORTED_LANGUAGES) == enum_values - {"english"}
+
+        benchmarks_root = Path(__file__).resolve().parents[1] / "benchmarks"
+        if benchmarks_root.exists():
+            for child in benchmarks_root.iterdir():
+                if child.is_dir():
+                    assert child.name == child.name.lower(), (
+                        f"Benchmark directory '{child.name}' must be lowercase"
+                    )
+
+    def test_no_template_file_marked_validated_in_repo(self):
+        """SLAI-017: No file under datasets/ or benchmarks/ may have validation_status=='validated' with SCHEMA_TEMPLATE source."""
+        import json
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[1]
+        for folder in ("datasets", "benchmarks"):
+            root = repo_root / folder
+            if not root.exists():
+                continue
+            for jsonl_file in root.rglob("*.jsonl"):
+                for lineno, line in enumerate(
+                    jsonl_file.read_text(encoding="utf-8").splitlines(), start=1
+                ):
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    rec = json.loads(stripped)
+                    meta = rec.get("metadata", rec)
+                    source = str(meta.get("source", ""))
+                    status = str(meta.get("validation_status", ""))
+                    if "SCHEMA_TEMPLATE" in source or "TEMPLATE_NOT" in source:
+                        assert status != "validated", (
+                            f"{jsonl_file}:{lineno} has template source '{source}' "
+                            f"but validation_status='validated'"
+                        )
+
