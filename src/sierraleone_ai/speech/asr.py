@@ -10,6 +10,8 @@ Provides:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from sierraleone_ai.datasets.schema import AudioRecord, VerifiedSpeechTranscriptionRecord
 from sierraleone_ai.training.guard import require_training_approval
@@ -72,11 +74,24 @@ def audit_speaker_leakage(
     )
 
 
-def start_asr_training(config: ASRTrainingConfig | None = None) -> None:
+def start_asr_training(
+    config: ASRTrainingConfig | None = None,
+    manifest_path: Path | None = None,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
     """Guarded entry point for ASR fine-tuning."""
-    require_training_approval(task="Krio ASR model training")
+    cfg = config or ASRTrainingConfig()
+    plan = require_training_approval(
+        task=f"{cfg.language} ASR model training ({cfg.base_model})",
+        language=cfg.language,
+        manifest_path=manifest_path,
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return plan
     raise NotImplementedError(
-        "ASR training requires verified audio recordings in datasets/krio/audio/ "
-        "and GPU hardware approval."
+        f"ASR training for {cfg.language} ({cfg.base_model}) requires verified audio "
+        "recordings in datasets/krio/audio/ and GPU hardware approval."
     )
 

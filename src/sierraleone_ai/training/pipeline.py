@@ -16,7 +16,8 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 from sierraleone_ai.training.guard import require_training_approval
 
@@ -179,18 +180,60 @@ class InstructionFineTuningConfig:
         return cls(pretrained_checkpoint=pretrained_checkpoint, **filtered)
 
 
-def run_continued_pretraining(config: ContinuedPretrainingConfig) -> ModelVersionMetadata:
+def _assert_not_raw_path(path: Path, field_name: str) -> None:
+    parts = PurePosixPath(str(path).replace("\\", "/")).parts
+    if "raw" in parts:
+        raise ValueError(
+            f"{field_name} ('{path}') points inside a 'raw/' directory. "
+            "No training code may read from raw/ folders directly."
+        )
+
+
+def run_continued_pretraining(
+    config: ContinuedPretrainingConfig,
+    manifest_path: Path | None = None,
+    *,
+    dry_run: bool = False,
+) -> ModelVersionMetadata | dict[str, Any]:
     """Guarded entry point for continued pretraining."""
-    require_training_approval(task=f"Continued pretraining ({config.language}) on {config.base_model_repo}")
+    if config.base_model_repo.strip().upper().startswith("TBD"):
+        raise ValueError(
+            f"base_model_repo is still unresolved ('{config.base_model_repo}'). "
+            "Select a verified base model before running continued pretraining."
+        )
+    _assert_not_raw_path(config.train_data_path, "train_data_path")
+    _assert_not_raw_path(config.val_data_path, "val_data_path")
+    plan = require_training_approval(
+        task=f"Continued pretraining ({config.language}) on {config.base_model_repo}",
+        language=config.language,
+        manifest_path=manifest_path,
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return plan
     raise NotImplementedError(
         "Continued pretraining requires native-speaker-validated corpus in "
         f"{config.train_data_path} and approved base model weights."
     )
 
 
-def run_instruction_finetuning(config: InstructionFineTuningConfig) -> ModelVersionMetadata:
+def run_instruction_finetuning(
+    config: InstructionFineTuningConfig,
+    manifest_path: Path | None = None,
+    *,
+    dry_run: bool = False,
+) -> ModelVersionMetadata | dict[str, Any]:
     """Guarded entry point for instruction fine-tuning."""
-    require_training_approval(task=f"Instruction fine-tuning ({config.language})")
+    _assert_not_raw_path(config.conversations_path, "conversations_path")
+    _assert_not_raw_path(config.translations_path, "translations_path")
+    plan = require_training_approval(
+        task=f"Instruction fine-tuning ({config.language})",
+        language=config.language,
+        manifest_path=manifest_path,
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return plan
     raise NotImplementedError(
         "Instruction fine-tuning requires a completed continued-pretraining checkpoint "
         "and native-speaker-validated conversation/translation datasets."

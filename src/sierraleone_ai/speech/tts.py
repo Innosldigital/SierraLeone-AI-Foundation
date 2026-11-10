@@ -9,6 +9,8 @@ Provides:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from sierraleone_ai.datasets.schema import VerifiedSpeechTranscriptionRecord
 from sierraleone_ai.training.guard import require_training_approval
@@ -41,6 +43,10 @@ def check_tts_recording_quality(
 
     if not record.metadata.contributor_consent:
         issues.append("Missing explicit contributor consent for voice synthesis")
+    elif "voice_synthesis" not in record.metadata.consent_scope:
+        issues.append(
+            "Missing explicit 'voice_synthesis' in consent_scope – ASR/general consent cannot be inferred for TTS"
+        )
 
     if record.sample_rate_hz is None or record.sample_rate_hz < cfg.min_sample_rate_hz:
         issues.append(
@@ -65,10 +71,24 @@ def check_tts_recording_quality(
     return (len(issues) == 0, issues)
 
 
-def start_tts_training(config: TTSTrainingConfig | None = None) -> None:
+def start_tts_training(
+    config: TTSTrainingConfig | None = None,
+    manifest_path: Path | None = None,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
     """Guarded entry point for TTS model training."""
-    require_training_approval(task="Krio TTS model training")
+    cfg = config or TTSTrainingConfig()
+    plan = require_training_approval(
+        task=f"{cfg.language} TTS model training ({cfg.base_architecture})",
+        language=cfg.language,
+        manifest_path=manifest_path,
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return plan
     raise NotImplementedError(
-        "TTS training requires studio-grade verified recordings and explicit speaker consent."
+        f"TTS training for {cfg.language} ({cfg.base_architecture}) requires studio-grade "
+        "verified recordings and explicit speaker consent."
     )
 
