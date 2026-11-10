@@ -3,6 +3,8 @@ Tests for split_manager deterministic_split and speaker_aware_split (SLAI-009 / 
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from sierraleone_ai.preprocessing.split_manager import (
@@ -95,10 +97,93 @@ class TestSpeakerAwareSplit:
         s2 = speaker_aware_split(records, seed=7)
         assert s1 == s2
 
-    def test_anonymous_records_handled(self):
-        """Records without speaker_id should be distributed across splits without error."""
-        records = [{"id": i} for i in range(30)]  # no speaker_id
-        splits = speaker_aware_split(records, seed=42, allow_missing_speaker_id=True)
-        total = sum(len(v) for v in splits.values())
-        assert total == len(records)
+    def test_missing_speaker_id_fails_closed_with_record_ids(self):
+        """SLAI-023: Records without speaker_id must fail closed and list offending record IDs."""
+        records = [
+            {"speaker_id": "spk_01", "id": "rec_001"},
+            {"id": "rec_missing_spk"},  # missing speaker_id
+        ]
+        with pytest.raises(ValueError, match="rec_missing_spk"):
+            speaker_aware_split(records, seed=42)
+
+    def test_small_n_three_and_four_speakers_nonempty_splits(self):
+        """SLAI-009: n=3 and n=4 speakers must allocate >= 1 speaker to every active split."""
+        for n_spk in (3, 4):
+            records = self._make_records(n_speakers=n_spk, records_per_speaker=2)
+            splits = speaker_aware_split(records, seed=42)
+            for name, split_recs in splits.items():
+                assert len(split_recs) >= 2, f"n={n_spk}: split '{name}' was empty"
+
+    def test_fewer_speakers_than_splits_raises_value_error(self):
+        """SLAI-009: 2 speakers across 3 splits must raise ValueError."""
+        records = self._make_records(n_speakers=2, records_per_speaker=2)
+        with pytest.raises(ValueError, match="need at least"):
+            speaker_aware_split(records, seed=42)
+
+    def test_speaker_manifest_persistence_and_reuse_on_new_speaker(self, tmp_path: Path):
+        """SLAI-023: Persisted speaker manifest preserves prior speaker splits when a new speaker arrives."""
+        manifest_path = tmp_path / "speaker_splits_v1.json"
+        initial_records = self._make_records(n_speakers=6, records_per_speaker=2)
+        splits_v1 = speaker_aware_split(
+            initial_records,
+            seed=42,
+            manifest_path=manifest_path,
+            persist_manifest=True,
+        )
+        assert manifest_path.exists()
+
+        # Map each original speaker to its v1 split
+        v1_assignment = {
+            r["speaker_id"]: split_name
+            for split_name, recs in splits_v1.items()
+            for r in recs
+        }
+
+        # Add a new speaker spk_99
+        expanded_records = initial_records + [
+            {"speaker_id": "spk_99", "id": 9901},
+            {"speaker_id": "spk_99", "id": 9902},
+        ]
+        splits_v2 = speaker_aware_split(
+            expanded_records,
+            seed=42,
+            manifest_path=manifest_path,
+            persist_manifest=True,
+        )
+        v2_assignment = {
+            r["speaker_id"]: split_name
+            for split_name, recs in splits_v2.items()
+            for r in recs
+        }
+
+        for spk, original_split in v1_assignment.items():
+            assert v2_assignment[spk] == original_split
+        assert "spk_99" in v2_assignment
+
+    def test_held_out_speakers_permanently_excluded(self, tmp_path: Path):
+        """SLAI-023: Speakers marked held_out in manifest must never enter train/validation/test."""
+        import json
+
+        manifest_path = tmp_path / "speaker_splits_v1.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "seed": 42,
+                    "ratios": {"train": 0.8, "validation": 0.1, "test": 0.1},
+                    "speaker_to_split": {"spk_held_out": "held_out"},
+                    "held_out_speakers": ["spk_held_out"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        records = self._make_records(n_speakers=4, records_per_speaker=2) + [
+            {"speaker_id": "spk_held_out", "id": 888}
+        ]
+        splits = speaker_aware_split(records, seed=42, manifest_path=manifest_path)
+        assigned_speakers = {
+            r["speaker_id"] for recs in splits.values() for r in recs
+        }
+        assert "spk_held_out" not in assigned_speakers
+
 
