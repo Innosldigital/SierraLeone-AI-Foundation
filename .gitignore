@@ -28,6 +28,7 @@ datasets/*/raw/*
 !datasets/*/raw/.gitkeep
 datasets/*/audio/*
 !datasets/*/audio/.gitkeep
+datasets/*/quarantine/
 !.gitkeep
 *.parquet
 *.arrow

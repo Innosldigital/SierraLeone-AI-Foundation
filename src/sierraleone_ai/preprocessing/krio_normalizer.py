@@ -1,58 +1,70 @@
 """
-Krio text normalisation.
+Krio text normalisation (SLAI-016 / SLAI-030).
 
 Sierra Leonean Krio is a distinct English-based creole language.
 It is NOT Nigerian Pidgin, Liberian English, or Cameroon Pidgin.
-This normaliser handles Krio-specific orthography, common spelling
-variants, and preprocessing steps for language model training.
+This normaliser handles Krio-specific orthography, Unicode repair,
+and preprocessing steps for language model training.
 
-References:
-  - Fyle, C.M. & Jones, E.D. (1980). Krio-English Dictionary. Oxford University Press.
-  - Sengova, J. (1987). The National Languages of Sierra Leone. Africana Journal.
+Reference:
+  - Fyle, C.M. & Jones, E.D. (1980). A Krio-English Dictionary. Oxford University Press / Sierra Leone University Press.
 
-NOTE: This is a scaffold. Native speaker review is required before
-      using normalised output as training data.
+NOTE: The cross-creole overlap marker list below is a heuristic diagnostic aid
+(`reviewed_by_native=False`), NOT an automatic rejection rule. Flagged records
+set `needs_native_review=True` and `possible_cross_creole_overlap`, while
+never setting `rejected=True` and always preserving `original` text.
 """
 from __future__ import annotations
 
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import ftfy
 
 # ---------------------------------------------------------------------------
 # Common Krio spelling normalisation table
-# (must be reviewed and extended by a native Krio speaker)
+# (must be reviewed and approved by a native Krio speaker panel before enabling)
 # ---------------------------------------------------------------------------
+SPELLING_VARIANTS_REVIEWED_BY_NATIVE: bool = False
+
 KRIO_SPELLING_VARIANTS: dict[str, str] = {
-    # These are illustrative placeholders only – do NOT treat as authoritative
-    # until reviewed by native speakers.
-    "aw": "aw",        # Krio pronoun 'we' – already standard
-    "una": "una",      # second-person plural – already standard
-    "na": "na",        # copula / locative – already standard
+    # Identity placeholders only – apply_spelling_variants=True will raise ValueError
+    # until SPELLING_VARIANTS_REVIEWED_BY_NATIVE is True and reviewed mappings exist.
+    "aw": "aw",
+    "una": "una",
+    "na": "na",
 }
 
 # ---------------------------------------------------------------------------
-# Non-Krio creole markers (SLAI-016: categorised by diagnostic confidence)
+# Cross-creole overlap heuristic markers (SLAI-016 / SLAI-030)
 # ---------------------------------------------------------------------------
-# HARD markers: very strong indication of non-Sierra Leonean origin (Nigerian / Ghanaian / Liberian)
+# Heuristic, incomplete, and unreviewed by a native panel (`reviewed_by_native=False`).
+# NEVER use these markers to auto-discard or auto-reject a record.
 HARD_CREOLE_MARKERS: dict[str, str] = {
-    "abeg": "Nigerian Pidgin ('please' – SL Krio uses 'duya' / 'pliz')",
-    "oyibo": "Nigerian Pidgin (SL Krio uses 'potho' / 'waitman')",
-    "shey": "Nigerian Pidgin question particle (SL Krio uses 'noto so' / 'ɛnti')",
-    "chale": "Ghanaian Pidgin ('friend' – SL Krio uses 'padi' / 'bo')",
+    "abeg": "Possible West African Pidgin overlap (verify with native SL Krio panel)",
+    "oyibo": "Possible Nigerian Pidgin overlap (SL Krio commonly uses 'potho' / 'waitman')",
+    "shey": "Possible Nigerian Pidgin question particle (SL Krio commonly uses 'noto so' / 'ɛnti')",
+    "chale": "Possible Ghanaian Pidgin overlap (SL Krio commonly uses 'padi' / 'bo')",
 }
 
-# SOFT markers: colloquialisms or spelling variants that warrant human review
 SOFT_CREOLE_MARKERS: dict[str, str] = {
-    "abi": "Nigerian Pidgin tag particle",
-    "comot": "Nigerian Pidgin spelling (SL Krio standard orthography: 'kɔmɔt')",
-    "my guy": "Liberian/Nigerian Pidgin colloquialism",
+    "abi": "Possible cross-creole tag particle (needs native review)",
+    "comot": "Possible non-standard orthography variant for 'kɔmɔt' (needs native review)",
+    "my guy": "Possible colloquialism overlap (needs native review)",
 }
 
 NON_KRIO_CREOLE_MARKERS: dict[str, str] = {**HARD_CREOLE_MARKERS, **SOFT_CREOLE_MARKERS}
+
+CREOLE_MARKER_METADATA: dict[str, dict[str, Any]] = {
+    marker: {
+        "tier": "hard" if marker in HARD_CREOLE_MARKERS else "soft",
+        "note": note,
+        "reviewed_by_native": False,
+    }
+    for marker, note in NON_KRIO_CREOLE_MARKERS.items()
+}
 
 # Characters to strip (control characters, BOM, etc.)
 _STRIP_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufeff]")
@@ -66,8 +78,11 @@ def detect_non_krio_creole_markers(
     include_soft: bool = True,
 ) -> list[str]:
     """
-    Scan text for lexical markers from Nigerian Pidgin, Liberian English,
-    or Ghanaian Pidgin to prevent cross-creole contamination in Krio datasets.
+    Scan text for heuristic lexical markers that may overlap with Nigerian Pidgin,
+    Liberian English, or Ghanaian Pidgin.
+
+    Returns a list of diagnostic notes for human native-speaker review.
+    Never used to auto-reject records (SLAI-030).
     """
     markers_to_check = NON_KRIO_CREOLE_MARKERS if include_soft else HARD_CREOLE_MARKERS
     flagged: list[str] = []
@@ -80,16 +95,18 @@ def detect_non_krio_creole_markers(
 
 def orthography_profile(text: str) -> dict[str, int | float]:
     """
-    Analyze Krio orthography characteristics.
+    Analyze Krio orthography characteristics (SLAI-016).
 
     Counts Sierra Leone standard IPA-derived open vowels:
       - open-e: ɛ (U+025B) / Ɛ (U+0190)
       - open-o: ɔ (U+0254) / Ɔ (U+0186)
-    and computes the open-vowel adoption metric.
+    versus plain Latin vowels (`e`/`o` and total `a e i o u`) without auto-converting.
     """
     normalized = unicodedata.normalize("NFC", text)
     open_e = len(re.findall(r"[ɛƐ]", normalized))
     open_o = len(re.findall(r"[ɔƆ]", normalized))
+    plain_e = len(re.findall(r"[eE]", normalized))
+    plain_o = len(re.findall(r"[oO]", normalized))
     total_open = open_e + open_o
     latin_vowels = len(re.findall(r"[aeiouAEIOU]", normalized))
 
@@ -99,6 +116,8 @@ def orthography_profile(text: str) -> dict[str, int | float]:
     return {
         "open_e_count": open_e,
         "open_o_count": open_o,
+        "plain_e_count": plain_e,
+        "plain_o_count": plain_o,
         "total_open_vowels": total_open,
         "standard_orthography_ratio": round(open_ratio, 4),
     }
@@ -108,14 +127,14 @@ def orthography_profile(text: str) -> dict[str, int | float]:
 class NormalisationConfig:
     """Configuration for the Krio text normaliser."""
 
-    fix_unicode: bool = True          # run ftfy unicode repair
+    fix_unicode: bool = True          # run ftfy unicode repair with explanation tracking
     lowercase: bool = False           # do NOT lowercase by default – Krio uses case
     strip_control_chars: bool = True
     normalise_whitespace: bool = True
     apply_spelling_variants: bool = False  # only after native-speaker review
     check_creole_contamination: bool = True
     max_length: int = 4096            # characters
-    on_overlong: Literal["truncate", "reject"] = "truncate"  # action when text exceeds max_length
+    on_overlong: Literal["truncate", "reject"] = "reject"  # SLAI-016: default to flag-and-reject
 
 
 @dataclass
@@ -123,10 +142,16 @@ class NormalisationResult:
     original: str
     normalised: str
     changes: list[str] = field(default_factory=list)
-    flagged_non_krio_markers: list[str] = field(default_factory=list)
+    possible_cross_creole_overlap: list[str] = field(default_factory=list)
+    needs_native_review: bool = False
     truncated: bool = False
     rejected: bool = False
     rejection_reason: str | None = None
+
+    @property
+    def flagged_non_krio_markers(self) -> list[str]:
+        """Backward-compatible alias for `possible_cross_creole_overlap` (SLAI-030)."""
+        return self.possible_cross_creole_overlap
 
 
 class KrioNormalizer:
@@ -136,15 +161,15 @@ class KrioNormalizer:
     Usage::
 
         normalizer = KrioNormalizer()
-        result = normalizer.normalise("Mi  de go  maket.")
-        print(result.normalised)  # "Mi de go maket."
+        result = normalizer.normalise("TEST  FIXTURE  TEXT.")
+        print(result.normalised)  # "TEST FIXTURE TEXT."
     """
 
     def __init__(self, config: NormalisationConfig | None = None) -> None:
         self.config = config or NormalisationConfig()
 
     def normalise(self, text: str) -> NormalisationResult:
-        """Normalise a single Krio text string."""
+        """Normalise a single Krio text string while preserving `result.original`."""
         result = NormalisationResult(original=text, normalised=text)
         cfg = self.config
 
@@ -158,11 +183,15 @@ class KrioNormalizer:
                 result.changes.append("rejected_overlong")
                 return result
 
-        # 1. Unicode repair (ftfy handles mojibake, ligatures, etc.)
+        # 1. Unicode repair (ftfy.fix_and_explain records exact transformations: SLAI-016)
         if cfg.fix_unicode:
-            fixed = ftfy.fix_text(text)
+            fixed, explanation = ftfy.fix_and_explain(text)
             if fixed != text:
                 result.changes.append("unicode_repaired")
+                if explanation:
+                    for step in explanation:
+                        action = step[0] if isinstance(step, tuple) and step else str(step)
+                        result.changes.append(f"ftfy:{action}")
             text = fixed
 
         # 2. Unicode normalisation to NFC (composed form)
@@ -192,14 +221,18 @@ class KrioNormalizer:
                 result.changes.append("lowercased")
             text = lowered
 
-        # 6. Optional spelling variant normalisation
+        # 6. Optional spelling variant normalisation (SLAI-016 guard)
         if cfg.apply_spelling_variants:
-            if not KRIO_SPELLING_VARIANTS:
+            active_variants = {
+                k: v for k, v in KRIO_SPELLING_VARIANTS.items() if k != v
+            }
+            if not SPELLING_VARIANTS_REVIEWED_BY_NATIVE or not active_variants:
                 raise ValueError(
-                    "apply_spelling_variants=True but KRIO_SPELLING_VARIANTS is empty. "
-                    "Review and populate standard spelling mappings first."
+                    "apply_spelling_variants=True is disabled because KRIO_SPELLING_VARIANTS "
+                    "contains only unreviewed placeholders. A native Krio speaker panel must "
+                    "review and approve spelling mappings first."
                 )
-            for variant, standard in KRIO_SPELLING_VARIANTS.items():
+            for variant, standard in active_variants.items():
                 pattern = re.compile(r"\b" + re.escape(variant) + r"\b", re.IGNORECASE)
                 new_text, n = pattern.subn(standard, text)
                 if n > 0:
@@ -212,11 +245,13 @@ class KrioNormalizer:
             result.truncated = True
             result.changes.append(f"truncated_at_{cfg.max_length}")
 
-        # 8. Cross-creole contamination check (Nigerian Pidgin / Liberian English / Ghanaian Pidgin)
+        # 8. Heuristic cross-creole overlap check (SLAI-030: never auto-rejects!)
         if cfg.check_creole_contamination:
             markers = detect_non_krio_creole_markers(text)
             if markers:
-                result.flagged_non_krio_markers = markers
+                result.possible_cross_creole_overlap = markers
+                result.needs_native_review = True
+                result.changes.append("possible_cross_creole_overlap")
                 result.changes.append("flagged_non_krio_creole_markers")
 
         result.normalised = text

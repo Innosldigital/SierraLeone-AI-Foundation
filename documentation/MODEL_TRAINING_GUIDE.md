@@ -1,9 +1,9 @@
 # Model Training Guide
 
 > ⚠️ **No training should begin until:**
-> 1. The dataset is reviewed and approved.
-> 2. A base model has been selected.
-> 3. Hardware resources are confirmed.
+> 1. The dataset is reviewed and approved (meeting thresholds in `training/guard.py`).
+> 2. A base model has been selected and recorded in `models/selected_base_model.json`.
+> 3. Hardware resources are confirmed and a signed `training/approvals/<run_id>.json` manifest is created.
 > 4. `SLAI_ALLOW_TRAINING=true` is set in `.env`.
 
 ---
@@ -14,7 +14,7 @@ We are NOT training a large language model from randomly initialised weights.
 
 **Approach:**
 1. Select a suitable open-weight multilingual base model (see Model Research below).
-2. Apply **continued pre-training** on Krio text to adapt the model's vocabulary and knowledge.
+2. Apply **continued pre-training** on validated Krio text (`datasets/krio/validated/`) when sufficient corpus scale exists, or start with SFT/LoRA on native-reviewed instruction/translation pairs.
 3. Apply **instruction fine-tuning** on conversations, Q&A pairs and translation pairs.
 4. Use **LoRA/QLoRA** for parameter-efficient fine-tuning to reduce hardware requirements.
 5. Evaluate with native speakers before any claim of fluency.
@@ -33,69 +33,79 @@ Evaluate each candidate model on:
 | Hardware requirements | Must fit available GPU memory |
 | Community support | Active maintenance reduces engineering burden |
 
-See `src/sierraleone_ai/models/registry.py` for current candidate list.
+See `src/sierraleone_ai/models/registry.py` for current candidate list (separated by `task`: `chat_llm`, `translation_seq2seq`, `asr`, `tts`).
 
 ---
 
-## Tokenisation Analysis (Required Before Training)
+## Tokenisation Analysis (Required Before Training — SLAI-029)
 
-For each candidate model, measure:
+Use the built-in reproducible CLI command (requires `pip install -e ".[training]"`; **downloads tokenizer files only, never model weights**):
 
-```python
-# Example – run this after installing transformers
-from transformers import AutoTokenizer
-
-KRIO_SAMPLE = "Mi de go maket tumara mɔning fɔ bai som rais en fish."
-
-tokenizer = AutoTokenizer.from_pretrained("MODEL_HF_REPO")
-tokens = tokenizer.encode(KRIO_SAMPLE)
-print(f"Token count: {len(tokens)}")
-print(f"Tokens/character: {len(tokens)/len(KRIO_SAMPLE):.2f}")
+```bash
+slai audit-tokenizer \
+  --tokenizer Qwen/Qwen3-4B-Base \
+  --corpus datasets/krio/validated/krio_text_train.jsonl \
+  --min-sentences 1000
 ```
 
-A model that uses many tokens per Krio word is not ideal.
-Target: ≤ 2 tokens per average Krio word.
+This reports:
+- `tokens_per_word` and `tokens_per_character`
+- `unknown_token_rate`
+- `top_fragmented_words` (fragmentation of the 20 most frequent words)
+- `open_vowel_handling` (how `ɛ` and `ɔ` are tokenised)
+- `english_sequence_length_overhead` (token ratio versus English on parallel sentences)
+
+> **Note on fertility targets:** Any `≤ 2.0 tokens/word` rule of thumb is an **unvalidated heuristic**, not a universal pass/fail threshold. Treat tokenizer fertility as one selection criterion alongside zero-shot Krio benchmark performance, `ɛ`/`ɔ` handling, VRAM budget, and licence terms.
 
 ---
 
-## Training Pipeline (Planned)
+## Training Readiness & Dry-Run Inspection (Implemented)
 
-### Phase A: Data Preparation
 ```bash
-# (future command)
+# Inspect dataset readiness and print the dry-run plan (downloads nothing, starts nothing)
+slai check-readiness krio --dry-run
+```
+
+---
+
+## Training Pipeline (**planned – not implemented**)
+
+### Phase A: Data Preparation (**planned – not implemented**)
+```bash
+# (planned – not implemented)
 slai prepare-data --language krio --split train
 ```
 
-### Phase B: Continued Pre-training
+### Phase B: Continued Pre-training (**planned – not implemented**)
 ```bash
-# (future command – requires SLAI_ALLOW_TRAINING=true)
+# (planned – not implemented – requires SLAI_ALLOW_TRAINING=true + approval manifest)
 slai train continued-pretraining \
   --model MODEL_ID \
-  --data datasets/krio/cleaned/ \
-  --output models/krio-llm/checkpoint-pretrain/
+  --data datasets/krio/validated/ \
+  --output models/krio-llm/checkpoints-cpt/
 ```
 
-### Phase C: Instruction Fine-tuning
+### Phase C: Instruction Fine-tuning (**planned – not implemented**)
 ```bash
-# (future command)
+# (planned – not implemented)
 slai train fine-tune \
-  --model models/krio-llm/checkpoint-pretrain/ \
+  --model models/krio-llm/checkpoints-cpt/ \
   --data datasets/krio/conversations/ \
-  --method lora \
-  --output models/krio-llm/checkpoint-sft/
+  --method qlora_4bit \
+  --output models/krio-llm/checkpoints-sft/
 ```
 
-### Phase D: Evaluation
+### Phase D: Evaluation (**planned – not implemented**)
 ```bash
-# (future command)
+# (planned – not implemented)
 slai evaluate \
-  --model models/krio-llm/checkpoint-sft/ \
+  --model models/krio-llm/checkpoints-sft/ \
   --benchmark benchmarks/krio/
 ```
 
 ---
 
-## Hardware Requirements (Estimates)
+## Hardware & OS Requirements (Estimates)
 
 | Model size | Minimum VRAM (inference) | Minimum VRAM (LoRA fine-tune) |
 |---|---|---|
@@ -104,18 +114,15 @@ slai evaluate \
 | 3–8B parameters | 16 GB | 24 GB |
 | 8–13B parameters | 24 GB | 40 GB |
 
-Cloud GPU options to consider (not endorsed):
-- Google Colab Pro (T4/A100)
-- Vast.ai (cost-effective spot instances)
-- RunPod
-- Google Cloud / AWS (for production training)
+> **Operating System Note (SLAI-018):** `bitsandbytes` 4-bit/8-bit quantisation is unreliable on native Windows. Always run QLoRA/LoRA training on **Linux**, **WSL2 (Ubuntu)**, or a **Linux cloud GPU instance**. Also note that NVIDIA T4 GPUs (e.g. default Colab) do not natively accelerate `bfloat16`; our default config uses `float16` for broad compatibility.
 
 ---
 
 ## Important Warnings
 
+- **Never train on `raw/` folders directly.**
 - **Never train on `machine_generated` data without clear labelling.**
 - **Never mix Nigerian Pidgin, Liberian English or other creoles into Krio training data.**
 - **Always checkpoint regularly** to avoid losing training progress.
 - **Always evaluate on the held-out benchmark** before claiming model quality.
-- **Document every training run** with hyperparameters, data version and hardware used.
+- **Document every training run** with a signed `training/approvals/<run_id>.json` manifest.

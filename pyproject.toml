@@ -60,21 +60,21 @@ eval = [
   "sacrebleu>=2.3",         # Apache-2.0 — preferred over hand-rolled BLEU for reporting
 ]
 training = [
-  # Uncomment and install ONLY on approved GPU hardware with SLAI_ALLOW_TRAINING=true
-  # "torch>=2.1",           # BSD-3-Clause
-  # "transformers>=4.37",   # Apache-2.0
-  # "peft>=0.8",            # Apache-2.0
-  # "bitsandbytes>=0.42",   # MIT
-  # "accelerate>=0.26",     # Apache-2.0
-  # "trl>=0.7",             # Apache-2.0
-  # "evaluate>=0.4",        # Apache-2.0
+  # Opt-in extra — install ONLY on approved GPU hardware with SLAI_ALLOW_TRAINING=true
+  "torch>=2.1",             # BSD-3-Clause
+  "transformers>=4.37",     # Apache-2.0
+  "peft>=0.8",              # Apache-2.0
+  "bitsandbytes>=0.42",     # MIT
+  "accelerate>=0.26",       # Apache-2.0
+  "trl>=0.7",               # Apache-2.0
+  "evaluate>=0.4",          # Apache-2.0
 ]
 audio = [
-  # Uncomment ONLY after verified audio collection is in place
-  # "torchaudio>=2.1",      # BSD-2-Clause
-  # "librosa>=0.10",        # ISC
-  # "soundfile>=0.12",      # BSD-3-Clause
-  # "openai-whisper>=20231117",  # MIT
+  # Opt-in extra — install ONLY after verified audio collection is in place
+  "torchaudio>=2.1",        # BSD-2-Clause
+  "librosa>=0.10",          # ISC
+  "soundfile>=0.12",        # BSD-3-Clause
+  "openai-whisper>=20231117",  # MIT
 ]
 dev = [
   "pytest>=7.4",

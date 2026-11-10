@@ -51,8 +51,7 @@ for repo in [
           f"= {len(tokens)/len(TEST_TEXT.split()):.2f} tokens/word")
 ```
 
-Target: ≤ 2 tokens per average word. This measurement MUST be repeated with
-verified native-speaker Krio text once it is available.
+> **Unvalidated Heuristic Note (SLAI-029):** Earlier `≤ 2 tokens/word` figures are an unvalidated heuristic, not a hard pass/fail threshold. Once a native-reviewed Krio corpus (≥ 1,000 sentences) is available, run `slai audit-tokenizer --tokenizer <hf-id> --corpus <path>` to measure `tokens/word`, `tokens/character`, `unk_token_rate`, word fragmentation, `ɛ`/`ɔ` handling, and sequence-length overhead versus English.
 
 ---
 
