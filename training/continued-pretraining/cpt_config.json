@@ -1,0 +1,25 @@
+{
+  "model_name": "cafp-krio-ai",
+  "stage": "continued-pretraining",
+  "language": "krio",
+  "base_model_repo": "TBD_AFTER_PHASE_3_TOKENIZER_AUDIT",
+  "train_data_path": "datasets/krio/validated/krio_text_train.jsonl",
+  "val_data_path": "datasets/krio/validated/krio_text_validation.jsonl",
+  "adaptation_method": "qlora_4bit",
+  "max_seq_length": 2048,
+  "learning_rate": 2e-05,
+  "num_train_epochs": 3,
+  "per_device_train_batch_size": 4,
+  "gradient_accumulation_steps": 8,
+  "warmup_ratio": 0.05,
+  "checkpoint": {
+    "output_dir": "models/krio-llm/checkpoints-cpt",
+    "save_strategy": "steps",
+    "save_steps": 250,
+    "save_total_limit": 3,
+    "eval_steps": 250,
+    "load_best_model_at_end": true,
+    "metric_for_best_model": "eval_loss",
+    "early_stopping_patience": 3
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "model_name": "cafp-krio-ai",
+  "stage": "instruction-fine-tuning",
+  "language": "krio",
+  "pretrained_checkpoint": "models/krio-llm/checkpoints-cpt/best",
+  "conversations_path": "datasets/krio/conversations/conversations_train.jsonl",
+  "translations_path": "datasets/krio/translations/translations_english_krio_train.jsonl",
+  "adaptation_method": "qlora_4bit",
+  "max_seq_length": 2048,
+  "learning_rate": 0.0001,
+  "num_train_epochs": 3,
+  "per_device_train_batch_size": 4,
+  "gradient_accumulation_steps": 4,
+  "lora": {
+    "r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    "bias": "none",
+    "bnb_4bit_quant_type": "nf4",
+    "bnb_4bit_compute_dtype": "float16",
+    "modules_to_save": []
+  },
+  "checkpoint": {
+    "output_dir": "models/krio-llm/checkpoints-sft",
+    "save_strategy": "steps",
+    "save_steps": 250,
+    "save_total_limit": 3,
+    "eval_steps": 250,
+    "load_best_model_at_end": true,
+    "metric_for_best_model": "eval_loss",
+    "early_stopping_patience": 3
+  }
+}
