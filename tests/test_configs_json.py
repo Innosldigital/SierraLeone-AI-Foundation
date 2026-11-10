@@ -25,3 +25,4 @@ def test_load_sft_config():
     assert cfg.learning_rate == 1e-4
     assert cfg.checkpoint.output_dir == Path("models/krio-llm/checkpoints-sft")
     assert cfg.lora.bnb_4bit_compute_dtype == "float16"
+
