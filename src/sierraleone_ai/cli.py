@@ -1,5 +1,5 @@
 """
-Sierra Leone AI Foundation – command-line interface.
+Sierra Leone AI Foundation – command-line interface (SLAI-020 / SLAI-024 / SLAI-029).
 Entry point: `slai`
 """
 from __future__ import annotations
@@ -13,8 +13,9 @@ from rich.table import Table
 
 from sierraleone_ai import SUPPORTED_LANGUAGES, __version__
 from sierraleone_ai.datasets.stats import print_dataset_summary
+from sierraleone_ai.evaluation.tokenizer_audit import audit_tokenizer_on_corpus
 from sierraleone_ai.models.registry import get_recommended, list_candidates
-from sierraleone_ai.training.guard import check_dataset_readiness
+from sierraleone_ai.training.guard import check_dataset_readiness, require_training_approval
 
 app = typer.Typer(
     name="slai",
@@ -26,13 +27,13 @@ console = Console()
 
 
 @app.command()
-def version():
+def version() -> None:
     """Show the current version."""
     console.print(f"[bold green]Sierra Leone AI Foundation[/bold green] v{__version__}")
 
 
 @app.command()
-def languages():
+def languages() -> None:
     """List supported and planned languages."""
     table = Table(title="Sierra Leonean Languages", show_lines=True)
     table.add_column("Code", style="cyan")
@@ -50,13 +51,21 @@ def languages():
 
 
 @app.command()
-def data_summary():
-    """Display real dataset summary table (excluding templates)."""
+def data_summary() -> None:
+    """Display exploratory dataset summary table (PREVIEW – not for training)."""
+    console.print("[bold yellow]PREVIEW – not for training[/bold yellow]")
     print_dataset_summary()
 
 
 @app.command()
-def check_readiness(language: str = typer.Argument("krio", help="Language code")):
+def check_readiness(
+    language: str = typer.Argument("krio", help="Language code"),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the training readiness dry-run plan (downloads nothing, starts nothing)",
+    ),
+) -> None:
     """Check dataset training readiness against minimum thresholds for a language."""
     items = check_dataset_readiness(language)
     table = Table(title=f"Dataset Training Readiness ({language})", show_lines=True)
@@ -71,9 +80,18 @@ def check_readiness(language: str = typer.Argument("krio", help="Language code")
 
     console.print(table)
 
+    if dry_run:
+        plan = require_training_approval(
+            task=f"{language} model training dry-run",
+            language=language,
+            dry_run=True,
+        )
+        console.print("\n[bold cyan]Dry-Run Plan (downloads=0, writes=0):[/bold cyan]")
+        console.print(json.dumps(plan, indent=2))
+
 
 @app.command()
-def validate_file(path: str):
+def validate_file(path: str) -> None:
     """Validate a JSONL dataset file against Pydantic schema rules."""
     file_path = Path(path)
     if not file_path.exists():
@@ -91,7 +109,6 @@ def validate_file(path: str):
                 continue
             try:
                 data = json.loads(line)
-                # Ensure metadata exists
                 if "metadata" not in data:
                     invalid_count += 1
                     errors.append(f"Line {lineno}: missing 'metadata' field")
@@ -111,39 +128,83 @@ def validate_file(path: str):
 
 
 @app.command()
-def status():
-    """Show current project phase, model readiness, and dataset status."""
-    console.print("\n[bold]Sierra Leone AI Foundation – Project Status[/bold]\n")
-    console.print("[green]✓[/green] Project foundation and schemas defined")
-    console.print("[green]✓[/green] Preprocessing and evaluation pipelines active")
-    console.print("[green]✓[/green] API stubs live (all model endpoints return HTTP 503)")
+def audit_tokenizer(
+    tokenizer: str = typer.Option(..., "--tokenizer", help="HuggingFace tokenizer ID"),
+    corpus: str = typer.Option(..., "--corpus", help="Path to native-reviewed Krio JSONL corpus"),
+    min_sentences: int = typer.Option(
+        1000,
+        "--min-sentences",
+        help="Minimum required native-reviewed sentences (default: 1000)",
+    ),
+) -> None:
+    """
+    Run reproducible tokenizer fertility and orthography audit (SLAI-029).
+    Downloads tokenizer files only — never model weights.
+    """
+    try:
+        report = audit_tokenizer_on_corpus(
+            corpus_path=Path(corpus),
+            tokenizer_id=tokenizer,
+            min_sentences=min_sentences,
+        )
+        console.print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    except Exception as exc:
+        console.print(f"[red]Tokenizer audit failed: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
-    # Dynamic base model status
+
+@app.command()
+def status() -> None:
+    """
+    Show current project state across the 5 canonical levels:
+    `implemented`, `scaffolded`, `not configured`, `not ready`, `operational` (SLAI-020).
+    """
+    console.print("\n[bold]Sierra Leone AI Foundation – Project Status[/bold]\n")
+
+    table = Table(title="Component Status (5-Level Audit State)", show_lines=True)
+    table.add_column("Subsystem", style="cyan")
+    table.add_column("State", style="yellow")
+    table.add_column("Details")
+
+    table.add_row(
+        "Dataset Schemas, Loader & Normaliser",
+        "implemented",
+        "Strict JSONL validation, consent/licence gates, and NFC normaliser active",
+    )
+    table.add_row(
+        "FastAPI Service (`/health/live`, `/health/ready`, 503 stubs)",
+        "scaffolded",
+        "Liveness up; readiness & model routes return 503 until a model is trained",
+    )
+
     recommended = get_recommended()
+    n_candidates = len(list_candidates())
     if recommended:
-        console.print(f"[green]✓[/green] Base model selected: {recommended.name}")
+        table.add_row("Base Model Selection", "implemented", f"Selected: {recommended.name}")
     else:
-        n_candidates = len(list_candidates())
-        console.print(
-            f"[yellow]○[/yellow] Base model: tokenisation research in progress "
-            f"({n_candidates} candidates registered, none approved yet)"
+        table.add_row(
+            "Base Model Selection",
+            "not configured",
+            f"{n_candidates} candidates registered; awaiting tokenizer audit & benchmark",
         )
 
-    # Dynamic dataset readiness status
     krio_readiness = check_dataset_readiness("krio")
     ready_count = sum(1 for item in krio_readiness.values() if item.ok)
     total_count = len(krio_readiness)
-    if ready_count == total_count:
-        console.print("[green]✓[/green] Krio training datasets meet minimum volume thresholds")
-    else:
-        console.print(
-            f"[yellow]○[/yellow] Krio training data: {ready_count}/{total_count} "
-            f"thresholds met (collection ongoing)"
-        )
+    data_state = "implemented" if ready_count == total_count else "not ready"
+    table.add_row(
+        "Krio Training & Benchmark Datasets",
+        data_state,
+        f"{ready_count}/{total_count} dataset readiness thresholds met",
+    )
 
-    console.print("[red]✗[/red] Model training: blocked by training guard until data + model approved")
-    console.print("[red]✗[/red] Speech recognition (ASR): awaiting audio recordings")
-    console.print("[red]✗[/red] Text-to-speech (TTS): awaiting studio-grade recordings\n")
+    table.add_row(
+        "LLM / Translation / ASR / TTS Models",
+        "not ready",
+        "No trained model is operational yet (0 operational models)",
+    )
+
+    console.print(table)
 
 
 if __name__ == "__main__":

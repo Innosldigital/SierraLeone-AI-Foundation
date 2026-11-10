@@ -1,7 +1,12 @@
 """Tests for evaluation metrics and native-speaker evaluation forms."""
 import pytest
 
-from sierraleone_ai.evaluation.metrics import bleu_score, character_error_rate, word_error_rate
+from sierraleone_ai.evaluation.metrics import (
+    bleu_score,
+    character_error_rate,
+    chrf_score,
+    word_error_rate,
+)
 from sierraleone_ai.evaluation.native_speaker import KrioFluencyEvaluation, LikertScore
 
 
@@ -25,6 +30,28 @@ class TestBLEU:
     def test_empty_vs_empty_returns_zero(self):
         """Both empty → hypothesis is empty → return 0.0 by convention."""
         assert bleu_score([[]], []) == 0.0
+
+    def test_two_token_exact_match_is_one(self):
+        """SLAI-008: bleu_score([["a", "b"]], ["a", "b"]) == 1.0."""
+        assert bleu_score([["a", "b"]], ["a", "b"]) == pytest.approx(1.0, abs=1e-6)
+
+    def test_empty_references_raises_value_error(self):
+        """SLAI-008: Empty references list raises ValueError."""
+        with pytest.raises(ValueError, match="references must be a non-empty"):
+            bleu_score([], ["a", "b"])
+
+
+class TestChrF:
+    def test_chrf_perfect_match(self):
+        assert chrf_score(["hello world"], "hello world") == pytest.approx(1.0, abs=1e-6)
+
+    def test_chrf_partial_match(self):
+        score = chrf_score(["hello world"], "hello earth")
+        assert 0.0 < score < 1.0
+
+    def test_chrf_empty_references_raises(self):
+        with pytest.raises(ValueError, match="references must not be empty"):
+            chrf_score([], "hello")
 
 
 class TestCER:
