@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from sierraleone_ai.datasets.schema import (
     AgriculturalConversationRecord,
+    ConsentScope,
     ConversationRecord,
     ConversationTurn,
     DatasetMetadata,
@@ -17,6 +18,8 @@ from sierraleone_ai.datasets.schema import (
     ValidationStatus,
     VerifiedSpeechTranscriptionRecord,
 )
+
+_DEFAULT_CONSENT_SCOPE: list[ConsentScope] = ["training"]
 
 
 def _make_reviewers(n: int = 2) -> list[ReviewerSignoff]:
@@ -88,9 +91,10 @@ class TestDatasetMetadata:
             _make_metadata(contributor_consent=True, consent_scope=[])
 
     def test_consent_scope_accepted_when_provided(self):
+        scope: list[ConsentScope] = ["training", "evaluation"]
         m = _make_metadata(
             contributor_consent=True,
-            consent_scope=["training", "evaluation"],
+            consent_scope=scope,
         )
         assert "training" in m.consent_scope
 
@@ -196,7 +200,7 @@ class TestVerifiedSpeechTranscriptionRecord:
             metadata=_make_metadata(
                 validation_status=ValidationStatus.VALIDATED,
                 contributor_consent=True,
-                consent_scope=["training"],
+                consent_scope=_DEFAULT_CONSENT_SCOPE,
                 reviews=_make_reviewers(2),
             ),
             audio_file_path="krio/audio/spk_01/rec_01.wav",

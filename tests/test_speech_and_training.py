@@ -5,6 +5,7 @@ import pytest
 
 from sierraleone_ai.datasets.schema import (
     AudioRecord,
+    ConsentScope,
     DatasetMetadata,
     Language,
     LicenceType,
@@ -30,15 +31,18 @@ def _make_reviewers(n: int = 2) -> list[ReviewerSignoff]:
     ]
 
 
+_DEFAULT_CONSENT_SCOPE: list[ConsentScope] = ["training"]
+
+
 def _make_validated_metadata(**kwargs) -> DatasetMetadata:
-    defaults = dict(
+    defaults: dict = dict(
         language=Language.KRIO,
         source="test_audio",
         collection_date=date(2024, 1, 1),
         licence=LicenceType.CC_BY_4,
         validation_status=ValidationStatus.VALIDATED,
         contributor_consent=True,
-        consent_scope=["training"],
+        consent_scope=_DEFAULT_CONSENT_SCOPE,
         reviews=_make_reviewers(2),
     )
     defaults.update(kwargs)
@@ -47,16 +51,7 @@ def _make_validated_metadata(**kwargs) -> DatasetMetadata:
 
 def _make_audio_record(speaker_id: str) -> AudioRecord:
     return AudioRecord(
-        metadata=DatasetMetadata(
-            language=Language.KRIO,
-            source="test_audio",
-            collection_date=date(2024, 1, 1),
-            licence=LicenceType.CC_BY_4,
-            validation_status=ValidationStatus.VALIDATED,
-            contributor_consent=True,
-            consent_scope=["training"],
-            reviews=_make_reviewers(2),
-        ),
+        metadata=_make_validated_metadata(),
         audio_file_path=f"krio/audio/{speaker_id}/rec.wav",
         speaker_id=speaker_id,
     )

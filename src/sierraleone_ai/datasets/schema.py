@@ -54,6 +54,9 @@ class LicenceType(str, Enum):
     UNKNOWN = "unknown"
 
 
+ConsentScope = Literal["training", "evaluation", "publication", "commercial"]
+
+
 # ---------------------------------------------------------------------------
 # Reviewer sign-off (SLAI-013: enforce dual native-speaker review)
 # ---------------------------------------------------------------------------
@@ -92,7 +95,7 @@ class DatasetMetadata(BaseModel):
         description="True if contributor has given explicit informed consent",
     )
     # Structured consent metadata (required when contributor_consent=True)
-    consent_scope: list[Literal["training", "evaluation", "publication", "commercial"]] = Field(
+    consent_scope: list[ConsentScope] = Field(
         default_factory=list,
         description="What the contributor has consented to. Required when contributor_consent=True.",
     )
@@ -276,19 +279,19 @@ class AudioRecord(BaseModel):
         description="Relative path from datasets root, e.g. 'krio/audio/speaker_01/rec_001.wav'",
     )
     transcript: str | None = None
-    duration_seconds: float | None = Field(None, ge=0)
-    sample_rate_hz: int | None = Field(None, description="e.g. 16000, 44100")
+    duration_seconds: float | None = Field(default=None, ge=0)
+    sample_rate_hz: int | None = Field(default=None, description="e.g. 16000, 44100")
     speaker_id: str | None = Field(
-        None,
+        default=None,
         description="Anonymised speaker identifier – used to prevent speaker leakage across splits",
     )
     gender: str | None = None
     age_group: str | None = None
     recording_environment: str | None = Field(
-        None, description="'studio', 'field', 'phone', 'home'"
+        default=None, description="'studio', 'field', 'phone', 'home'"
     )
     snr_db: float | None = Field(
-        None, description="Signal-to-noise ratio in dB, if measured"
+        default=None, description="Signal-to-noise ratio in dB, if measured"
     )
 
 
