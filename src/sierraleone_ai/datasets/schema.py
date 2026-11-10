@@ -235,7 +235,14 @@ class AgriculturalConversationRecord(ConversationRecord):
     Tracks crop/livestock focus, Sierra Leone agro-ecological context, and agronomic verification.
     """
 
-    domain: str = Field("agriculture", frozen=True)
+    domain: str = Field(default="agriculture")
+
+    @field_validator("domain")
+    @classmethod
+    def enforce_agriculture_domain(cls, v: str) -> str:
+        if v != "agriculture":
+            raise ValueError("AgriculturalConversationRecord domain must be 'agriculture'")
+        return v
     crop_or_livestock: str | None = Field(
         None,
         description="Target crop or livestock, e.g. 'cassava (kasada)', 'rice (rais)', 'cocoa', 'poultry'",
