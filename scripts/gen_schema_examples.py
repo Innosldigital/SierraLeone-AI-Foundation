@@ -11,6 +11,7 @@ import json
 from sierraleone_ai.datasets.schema import (
     AudioRecord,
     BenchmarkItem,
+    ConsentScope,
     ConversationRecord,
     ConversationTurn,
     DatasetMetadata,
@@ -22,7 +23,7 @@ from sierraleone_ai.datasets.schema import (
 )
 
 
-def make_metadata(consent_scope: list[str]) -> DatasetMetadata:
+def make_metadata(consent_scope: list[ConsentScope]) -> DatasetMetadata:
     return DatasetMetadata(
         schema_version=2,
         record_id="01234567-89ab-4cde-8f01-23456789abcd",
