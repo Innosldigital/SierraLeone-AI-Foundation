@@ -7,6 +7,7 @@ Uses Pydantic schema v2 models with neutral TEST_FIXTURE strings.
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from sierraleone_ai.datasets.schema import (
     AudioRecord,
@@ -15,8 +16,10 @@ from sierraleone_ai.datasets.schema import (
     ConversationRecord,
     ConversationTurn,
     DatasetMetadata,
+    DataSplit,
     KrioTextRecord,
     Language,
+    LicenceType,
     ReviewerSignoff,
     TranslationRecord,
     ValidationStatus,
@@ -29,15 +32,17 @@ def make_metadata(consent_scope: list[ConsentScope]) -> DatasetMetadata:
         record_id="01234567-89ab-4cde-8f01-23456789abcd",
         language=Language.KRIO,
         source="test_fixture_approved_source",
-        collection_date="2026-01-15",
-        licence="CC-BY-4.0",
+        collection_date=date(2026, 1, 15),
+        licence=LicenceType.CC_BY_4,
         licence_id="CC-BY-4.0",
         validation_status=ValidationStatus.VALIDATED,
         dataset_version="0.2.0",
-        split="train",
+        split=DataSplit.TRAIN,
         contributor_id="contrib_001",
         contributor_consent=True,
         consent_scope=consent_scope,
+        consent_record_id=None,
+        consent_withdrawn=False,
         access_class="public",
         training_permitted=True,
         redistribution_permitted=True,
@@ -45,13 +50,13 @@ def make_metadata(consent_scope: list[ConsentScope]) -> DatasetMetadata:
             ReviewerSignoff(
                 reviewer_id="rev_sl_001",
                 is_native_speaker_of_record_language=True,
-                reviewed_on="2026-01-16",
+                reviewed_on=date(2026, 1, 16),
                 verdict="approve",
             ),
             ReviewerSignoff(
                 reviewer_id="rev_sl_002",
                 is_native_speaker_of_record_language=True,
-                reviewed_on="2026-01-17",
+                reviewed_on=date(2026, 1, 17),
                 verdict="approve",
             ),
         ],
@@ -68,8 +73,8 @@ def gen_examples() -> dict[str, str]:
 
     trans_rec = TranslationRecord(
         metadata=make_metadata(["text_training"]),
-        source_language="english",
-        target_language="krio",
+        source_language=Language.ENGLISH,
+        target_language=Language.KRIO,
         source_text="TEST_FIXTURE_ENGLISH_SOURCE_001",
         target_text="TEST_FIXTURE_KRIO_TARGET_001",
         translation_method="human",
@@ -81,12 +86,15 @@ def gen_examples() -> dict[str, str]:
         conversation_id="00000000-0000-4000-8000-000000000002",
         turns=[
             ConversationTurn(
-                speaker="user", turn_index=0, language="krio", text="TEST_FIXTURE_USER_PROMPT_001"
+                speaker="user",
+                turn_index=0,
+                language=Language.KRIO,
+                text="TEST_FIXTURE_USER_PROMPT_001",
             ),
             ConversationTurn(
                 speaker="assistant",
                 turn_index=1,
-                language="krio",
+                language=Language.KRIO,
                 text="TEST_FIXTURE_ASSISTANT_RESPONSE_001",
             ),
         ],
@@ -100,7 +108,6 @@ def gen_examples() -> dict[str, str]:
         speaker_id="spk_01",
         transcript="TEST_FIXTURE_TRANSCRIPT_001",
         sample_rate_hz=24000,
-        channels=1,
         snr_db=32.0,
         recording_environment="studio",
     )
@@ -111,15 +118,17 @@ def gen_examples() -> dict[str, str]:
             record_id="00000000-0000-4000-8000-000000000003",
             language=Language.KRIO,
             source="test_fixture_benchmark_collection",
-            collection_date="2026-01-20",
-            licence="CC-BY-4.0",
+            collection_date=date(2026, 1, 20),
+            licence=LicenceType.CC_BY_4,
             licence_id="CC-BY-4.0",
             validation_status=ValidationStatus.VALIDATED,
             dataset_version="0.2.0",
-            split="held_out",
+            split=DataSplit.HELD_OUT,
             contributor_id="contrib_bench_01",
             contributor_consent=True,
             consent_scope=["evaluation"],
+            consent_record_id=None,
+            consent_withdrawn=False,
             access_class="public",
             training_permitted=False,
             redistribution_permitted=True,
@@ -127,13 +136,13 @@ def gen_examples() -> dict[str, str]:
                 ReviewerSignoff(
                     reviewer_id="rev_sl_001",
                     is_native_speaker_of_record_language=True,
-                    reviewed_on="2026-01-21",
+                    reviewed_on=date(2026, 1, 21),
                     verdict="approve",
                 ),
                 ReviewerSignoff(
                     reviewer_id="rev_sl_002",
                     is_native_speaker_of_record_language=True,
-                    reviewed_on="2026-01-22",
+                    reviewed_on=date(2026, 1, 22),
                     verdict="approve",
                 ),
             ],
