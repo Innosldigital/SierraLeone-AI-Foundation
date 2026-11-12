@@ -23,13 +23,24 @@ ENV/
 *.key
 secrets/
 
-# Data – large binary files should use Git LFS or DVC
-datasets/*/raw/*
-!datasets/*/raw/.gitkeep
-datasets/*/audio/*
-!datasets/*/audio/.gitkeep
-datasets/*/quarantine/
-!.gitkeep
+# Data – deny-by-default for data: only templates, keepfiles, register and manifests are committed
+datasets/**
+!datasets/
+!datasets/**/
+!datasets/**/.gitkeep
+!datasets/**/example_*.jsonl
+!datasets/source_register.csv
+!datasets/manifests/
+!datasets/manifests/*.manifest.json
+
+benchmarks/**
+!benchmarks/
+!benchmarks/**/
+!benchmarks/**/.gitkeep
+!benchmarks/**/*schema*.jsonl
+!benchmarks/manifests/
+!benchmarks/manifests/*.manifest.json
+*.zip
 *.parquet
 *.arrow
 *.bin

@@ -63,6 +63,24 @@ EXCLUDED_FILES: frozenset[str] = frozenset({
 })
 
 
+def _data_allowed(rel: PurePosixPath) -> bool:
+    """Return True if rel is an allowed template, keepfile, register, or manifest."""
+    parts = rel.parts
+    if not parts:
+        return True
+    name = parts[-1]
+    if parts[0] == "datasets":
+        return (
+            name == ".gitkeep"
+            or name.startswith("example_")
+            or name == "source_register.csv"
+            or "manifests" in parts
+        )
+    if parts[0] == "benchmarks":
+        return name == ".gitkeep" or "schema" in name or "manifests" in parts
+    return True
+
+
 def should_include_path(rel_path: PurePosixPath) -> bool:
     """Return True if `rel_path` belongs in a clean source archive."""
     parts = rel_path.parts
@@ -81,10 +99,8 @@ def should_include_path(rel_path: PurePosixPath) -> bool:
     if suffix in EXCLUDED_SUFFIXES:
         return False
 
-    # Exclude private raw/ or audio/ files except .gitkeep
-    if len(parts) >= 3 and parts[0] == "datasets" and parts[2] in ("raw", "audio"):
-        if name != ".gitkeep":
-            return False
+    if not _data_allowed(rel_path):
+        return False
 
     return True
 

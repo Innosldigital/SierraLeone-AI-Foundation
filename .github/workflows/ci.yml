@@ -49,6 +49,16 @@ jobs:
           fi
           echo "OK: No unreviewed Krio text detected in test files."
 
+      - name: Check datasets and benchmarks track only allowed files (PA-006)
+        run: |
+          disallowed=$(git ls-files datasets benchmarks | grep -v -E '(\.gitkeep$|example_.*\.jsonl$|source_register\.csv$|.*schema.*\.jsonl$|manifests/.*\.manifest\.json$)') || true
+          if [ -n "$disallowed" ]; then
+            echo "ERROR: Real data or non-template file tracked in git under datasets/ or benchmarks/:"
+            echo "$disallowed"
+            exit 1
+          fi
+          echo "OK: datasets and benchmarks track only allowed templates, keepfiles, register, and manifests."
+
       - name: Reject committed secrets, .env, virtualenvs, caches, or model weights (SLAI-018 / SLAI-021)
         run: |
           if git ls-files --error-unmatch .env >/dev/null 2>&1; then
