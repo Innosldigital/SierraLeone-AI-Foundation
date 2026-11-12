@@ -40,6 +40,14 @@ class TestCLI:
         result = runner.invoke(app, ["check-readiness", "krio"])
         assert result.exit_code == 0, f"check-readiness command failed: {result.output}"
 
+    def test_build_manifest_exits_zero(self, tmp_path: Path, monkeypatch):
+        """PA-001: build-manifest command builds a valid manifest and exits zero."""
+        import sierraleone_ai.config as cfg_module
+        monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
+        result = runner.invoke(app, ["build-manifest", "krio", "--split", "train"])
+        assert result.exit_code == 0, f"build-manifest command failed: {result.output}"
+        assert "Dataset manifest built" in result.output
+
     def test_check_readiness_dry_run_exits_zero(self):
         result = runner.invoke(app, ["check-readiness", "krio", "--dry-run"])
         assert result.exit_code == 0, f"check-readiness --dry-run failed: {result.output}"

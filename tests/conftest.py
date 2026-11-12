@@ -31,3 +31,4 @@ def _inject_test_approved_source(monkeypatch: pytest.MonkeyPatch) -> Iterator[No
 
     monkeypatch.setattr(loader, "load_source_register", _patched)
     yield
+

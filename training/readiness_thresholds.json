@@ -1,0 +1,13 @@
+{
+  "_comment": "Minimum ELIGIBLE (validated, consented, rights-cleared, de-duplicated) record counts before training may be approved. These are PLANNING TARGETS for a full model, not pilot gates; see promtp/PROJECT_ROADMAP.md for smaller pilot gates. Changing a value requires a reviewed commit.",
+  "version": 1,
+  "thresholds": {
+    "cleaned_text": 50000,
+    "translations": 10000,
+    "conversations": 1000,
+    "held_out_benchmark": 1000,
+    "asr_audio": 1000,
+    "tts_audio": 500
+  }
+}
+

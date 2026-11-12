@@ -58,6 +58,35 @@ def data_summary() -> None:
 
 
 @app.command()
+def build_manifest(
+    language: str = typer.Argument("krio", help="Language code"),
+    split: str = typer.Option("train", "--split", help="Data split to scan and manifest"),
+) -> None:
+    """Build a versioned, hash-verified dataset manifest for training readiness (PA-001)."""
+    from sierraleone_ai.datasets.manifest import (
+        build_manifest as _build_manifest,
+    )
+    from sierraleone_ai.datasets.manifest import (
+        load_manifest,
+    )
+
+    try:
+        manifest_path = _build_manifest(language=language, split=split)
+        manifest = load_manifest(manifest_path)
+        console.print(f"[bold green]Dataset manifest built:[/bold green] {manifest_path}")
+        console.print(f"  [cyan]Manifest ID:[/cyan] {manifest.manifest_id}")
+        console.print(f"  [cyan]Files indexed:[/cyan] {len(manifest.files)}")
+        console.print("  [cyan]Eligible record counts:[/cyan]")
+        for task, count in manifest.eligible_counts.items():
+            console.print(f"    • {task}: {count:,}")
+        if manifest.skipped:
+            console.print(f"  [yellow]Skipped records:[/yellow] {sum(manifest.skipped.values()):,}")
+    except Exception as exc:
+        console.print(f"[red]Error building dataset manifest: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command()
 def check_readiness(
     language: str = typer.Argument("krio", help="Language code"),
     dry_run: bool = typer.Option(

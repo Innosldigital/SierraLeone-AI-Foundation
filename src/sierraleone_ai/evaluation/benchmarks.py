@@ -149,6 +149,40 @@ def find_benchmark_overlap(
     return [i for i, t in enumerate(texts) if text_fingerprint(t) in fps]
 
 
+def count_validated_benchmark_items(language: str = "krio") -> int:
+    """
+    Count held-out benchmark items that are schema-valid, VALIDATED, split=held_out
+    and not templates, de-duplicated by record_id (PA-001). Malformed rows count 0.
+    """
+    from sierraleone_ai.datasets.schema import DatasetMetadata, DataSplit, ValidationStatus
+
+    bench_dir = settings.language_benchmark_dir(language)
+    if not bench_dir.is_dir():
+        return 0
+    ids: set[str] = set()
+    for jf in sorted(bench_dir.glob("*.jsonl")):
+        if any(jf.stem.startswith(s) for s in _SCHEMA_TEMPLATE_STEMS) or jf.name.endswith(".issues.jsonl"):
+            continue
+        with jf.open(encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                try:
+                    rec = json.loads(line)
+                    meta = DatasetMetadata.model_validate(rec.get("metadata"))
+                except Exception:
+                    continue
+                if (
+                    _is_template_record(meta.source)
+                    or meta.validation_status is not ValidationStatus.VALIDATED
+                    or meta.split is not DataSplit.HELD_OUT
+                ):
+                    continue
+                ids.add(meta.record_id)
+    return len(ids)
+
+
 def assert_held_out_integrity(language: str = "krio") -> bool:
     """
     Verify that the held-out benchmark directory exists and contains

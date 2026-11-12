@@ -7,7 +7,8 @@ Training requires ALL of:
   2. A verified machine-readable approval manifest (`training/approvals/<run_id>.json`)
      with base model revision, licence review, dataset versions + SHA-256 hashes
      (never in `raw/`), split manifest ID, benchmark ID, GPU/cost estimate, and approver
-  3. Minimum dataset thresholds met (real, non-template records)
+  3. Minimum ELIGIBLE-record thresholds met, read from a hash-verified dataset
+     manifest (`datasets/manifests/<language>-<split>-vN.manifest.json`, PA-001)
   4. Held-out evaluation benchmark integrity verified
   5. A base model selected in the registry (`models/selected_base_model.json`)
 
@@ -29,16 +30,43 @@ from pydantic import BaseModel, Field, field_validator
 from sierraleone_ai.config import settings
 
 # ---------------------------------------------------------------------------
-# Minimum dataset thresholds (from DATA_COLLECTION_GUIDE.md)
+# Minimum dataset thresholds (versioned in training/readiness_thresholds.json)
 # ---------------------------------------------------------------------------
-_MIN_RECORDS: dict[str, int] = {
+# Fail-closed defaults, used only if the JSON file is missing. They must match it.
+_DEFAULT_MIN_RECORDS: dict[str, int] = {
     "cleaned_text": 50_000,
     "translations": 10_000,
     "conversations": 1_000,
-    "validated_text": 1_000,       # held-out evaluation benchmark
+    "held_out_benchmark": 1_000,
     "asr_audio": 1_000,            # verified ASR speech-transcript pairs
-    "tts_audio": 500,              # studio-grade TTS voice recordings
+    "tts_audio": 500,              # TTS recordings with voice_synthesis consent
 }
+
+# Readiness key -> training task counted in the dataset manifest (PA-001).
+_READINESS_TASKS: dict[str, str] = {
+    "cleaned_text": "text_training",
+    "translations": "translation_training",
+    "conversations": "conversation_training",
+    "asr_audio": "asr_training",
+    "tts_audio": "tts_training",
+}
+
+
+def _load_thresholds() -> dict[str, int]:
+    path = settings.project_root / "training" / "readiness_thresholds.json"
+    thresholds = dict(_DEFAULT_MIN_RECORDS)
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            for key, value in data.get("thresholds", {}).items():
+                if key in thresholds and isinstance(value, int) and value > 0:
+                    thresholds[key] = value
+        except (OSError, ValueError) as exc:
+            logger.warning(f"[TRAINING GUARD] Could not read {path}: {exc}; using defaults")
+    return thresholds
+
+
+_MIN_RECORDS: dict[str, int] = _load_thresholds()
 
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
@@ -48,6 +76,7 @@ class ReadinessItem:
     key: str
     have: int
     need: int
+    detail: str = ""
 
     @property
     def ok(self) -> bool:
@@ -68,7 +97,8 @@ class ReadinessItem:
 
     def __str__(self) -> str:
         status = "✓" if self.ok else "✗"
-        return f"  {status} {self.key}: {self.have:,} / {self.need:,} records"
+        suffix = f" ({self.detail})" if self.detail else ""
+        return f"  {status} {self.key}: {self.have:,} / {self.need:,} records{suffix}"
 
 
 class ModelLicenceReview(BaseModel):
@@ -166,49 +196,59 @@ def verify_training_manifest(
     return manifest
 
 
-def check_dataset_readiness(language: str = "krio") -> dict[str, ReadinessItem]:
+def check_dataset_readiness(
+    language: str = "krio",
+    split: str = "train",
+    manifest_path: Path | None = None,
+) -> dict[str, ReadinessItem]:
     """
-    Check whether minimum real-data thresholds are met before training.
+    Check whether minimum ELIGIBLE-record thresholds are met before training (PA-001).
 
-    Returns a dict of ReadinessItem (each has .ready/.ok, .count/.have, .need, .name/.key).
-    Template and example files are excluded (SLAI-002).
+    Counts come from the dataset manifest built by `slai build-manifest`, which uses the
+    same strict loader + EligibilityPolicy as training, de-duplicated by record_id.
+    The manifest's file hashes are re-verified here; if there is no manifest, or the data
+    on disk has changed since it was built, every data count is reported as 0.
     """
-    from sierraleone_ai.datasets.loader import _count_real_records
+    from sierraleone_ai.datasets.manifest import (
+        latest_manifest_path,
+        load_manifest,
+        verify_manifest,
+    )
+    from sierraleone_ai.evaluation.benchmarks import count_validated_benchmark_items
 
-    lang_dir = settings.language_data_dir(language)
+    counts: dict[str, int] = {}
+    detail = ""
+    path = manifest_path or latest_manifest_path(language, split)
+    if path is None:
+        detail = f"no dataset manifest; run `slai build-manifest {language} --split {split}`"
+    else:
+        try:
+            manifest = load_manifest(path)
+        except (OSError, ValueError) as exc:
+            detail = f"invalid manifest {path.name}: {exc}"
+        else:
+            if manifest.language != language or manifest.split != split:
+                detail = f"manifest {manifest.manifest_id} is not for {language}/{split}"
+            else:
+                problems = verify_manifest(manifest)
+                if problems:
+                    detail = f"manifest {manifest.manifest_id} is stale: {problems[0]}"
+                    if len(problems) > 1:
+                        detail += f" (+{len(problems) - 1} more)"
+                else:
+                    counts = manifest.eligible_counts
 
-    def _count_in(subdir: str) -> int:
-        d = lang_dir / subdir
-        if not d.exists():
-            return 0
-        total = 0
-        for jf in d.glob("*.jsonl"):
-            if jf.stem.startswith("example_"):
-                continue
-            total += _count_real_records(jf)
-        return total
-
-    cleaned = _count_in("cleaned") + _count_in("validated")
-    translations = _count_in("translations")
-    conversations = _count_in("conversations")
-    asr_audio = _count_in("audio")
-    tts_audio = _count_in("tts")
-    bench_dir = settings.language_benchmark_dir(language)
-    benchmark = 0
-    if bench_dir.exists():
-        for jf in bench_dir.glob("*.jsonl"):
-            if jf.stem.startswith("example_") or jf.stem.startswith("held_out_eval_schema"):
-                continue
-            benchmark += _count_real_records(jf)
-
-    return {
-        "cleaned_text": ReadinessItem("cleaned_text", cleaned, _MIN_RECORDS["cleaned_text"]),
-        "translations": ReadinessItem("translations", translations, _MIN_RECORDS["translations"]),
-        "conversations": ReadinessItem("conversations", conversations, _MIN_RECORDS["conversations"]),
-        "held_out_benchmark": ReadinessItem("held_out_benchmark", benchmark, _MIN_RECORDS["validated_text"]),
-        "asr_audio": ReadinessItem("asr_audio", asr_audio, _MIN_RECORDS["asr_audio"]),
-        "tts_audio": ReadinessItem("tts_audio", tts_audio, _MIN_RECORDS["tts_audio"]),
+    items = {
+        key: ReadinessItem(key, int(counts.get(task, 0)), _MIN_RECORDS[key], detail)
+        for key, task in _READINESS_TASKS.items()
     }
+    items["held_out_benchmark"] = ReadinessItem(
+        "held_out_benchmark",
+        count_validated_benchmark_items(language),
+        _MIN_RECORDS["held_out_benchmark"],
+    )
+    order = ("cleaned_text", "translations", "conversations", "held_out_benchmark", "asr_audio", "tts_audio")
+    return {k: items[k] for k in order}
 
 
 def require_training_approval(

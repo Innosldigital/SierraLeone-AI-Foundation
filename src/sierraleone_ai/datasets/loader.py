@@ -738,32 +738,29 @@ def load_conversations(
 
 
 # ---------------------------------------------------------------------------
-# Dataset summary (SLAI-002: template files are not counted as real data)
+# Dataset summary – PREVIEW only (PA-001 / PA-007)
 # ---------------------------------------------------------------------------
+# Training readiness is NOT computed here; it comes from the hash-verified dataset
+# manifest (see datasets/manifest.py and training/guard.py::check_dataset_readiness).
 
-def _count_real_records(path: Path, policy: LoadPolicy | None = None) -> int:
+def _count_schema_valid_records(path: Path) -> int:
     """
-    Count records in a JSONL file that pass the eligibility gate.
-    Uses a permissive split so records from any split are counted (summary mode).
+    Count rows whose metadata is schema-valid, not a template, and not REJECTED.
+    Rows without valid metadata (including quarantine issue rows) count 0 (PA-007).
     """
-    if policy is None:
-        policy = LoadPolicy(require_consent=False)
-
-    if not path.exists():
-        return 0
-
-    raw = _load_jsonl(path, strict=False)
-    source_reg = load_source_register()
     count = 0
-    for rec in raw:
-        meta = rec.get("metadata", {})
-        source: str = meta.get("source", "")
-        status: str = meta.get("validation_status", "")
-        if source.upper().startswith(_TEMPLATE_PREFIXES):
+    rows, _issues, _total = _load_jsonl_with_issues(path)
+    for _lineno, rec in rows:
+        meta_raw = rec.get("metadata")
+        if not isinstance(meta_raw, dict):
             continue
-        if status == ValidationStatus.REJECTED.value:
+        try:
+            meta = DatasetMetadata.model_validate(meta_raw)
+        except Exception:
             continue
-        if source in source_reg and source_reg[source].get("decision", "UNREVIEWED").upper() != "APPROVED":
+        if meta.source.upper().startswith(TEMPLATE_PREFIXES):
+            continue
+        if meta.validation_status is ValidationStatus.REJECTED:
             continue
         count += 1
     return count
@@ -771,16 +768,21 @@ def _count_real_records(path: Path, policy: LoadPolicy | None = None) -> int:
 
 def dataset_summary() -> dict[str, dict[str, int]]:
     """
-    Return a summary dict: language → subdirectory → real record count.
-    Template, rejected, and unreviewed-source records are NOT counted.
+    Return a PREVIEW summary: language → subdirectory → schema-valid record count.
+
+    Skips templates (`example_*`), quarantine reports (`*.issues.jsonl`), and the
+    `quarantine/`, `splits/`, `manifests/`, `raw/`, `rejected/` folders. These numbers
+    are NOT training-eligible counts – use `slai build-manifest` / `slai check-readiness`.
     Returns {} if the data directory does not exist.
     """
+    from sierraleone_ai.datasets.manifest import is_countable_data_file
+
     if not settings.data_dir.exists():
         return {}
 
     summary: dict[str, dict[str, int]] = {}
     for lang_dir in sorted(settings.data_dir.iterdir()):
-        if not lang_dir.is_dir():
+        if not lang_dir.is_dir() or lang_dir.name == "manifests":
             continue
         lang = lang_dir.name
         summary[lang] = {}
@@ -788,11 +790,9 @@ def dataset_summary() -> dict[str, dict[str, int]]:
             if not sub.is_dir():
                 continue
             total = 0
-            for jf in sub.glob("*.jsonl"):
-                # Skip example/template files from the count
-                if jf.stem.startswith("example_"):
-                    continue
-                total += _count_real_records(jf)
+            for jf in sorted(sub.glob("*.jsonl")):
+                if is_countable_data_file(jf):
+                    total += _count_schema_valid_records(jf)
             if total > 0:
                 summary[lang][sub.name] = total
     return summary
