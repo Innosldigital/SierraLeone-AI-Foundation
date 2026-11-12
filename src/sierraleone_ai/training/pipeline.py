@@ -207,6 +207,8 @@ def run_continued_pretraining(
         task=f"Continued pretraining ({config.language}) on {config.base_model_repo}",
         language=config.language,
         manifest_path=manifest_path,
+        task_key="chat_llm_cpt",
+        config=config,
         dry_run=dry_run,
     )
     if dry_run:
@@ -230,6 +232,8 @@ def run_instruction_finetuning(
         task=f"Instruction fine-tuning ({config.language})",
         language=config.language,
         manifest_path=manifest_path,
+        task_key="chat_llm_sft",
+        config=config,
         dry_run=dry_run,
     )
     if dry_run:

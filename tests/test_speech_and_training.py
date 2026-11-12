@@ -249,6 +249,7 @@ def test_training_guard_rejects_manifest_referencing_raw_or_mismatched_sha256(
         "reviewed_on": "2025-01-15",
         "licence": "Apache-2.0",
         "commercial_permitted": True,
+        "intended_use": "research",
     }
 
     # 1. Manifest referencing raw/ directory must fail validation
@@ -263,6 +264,7 @@ def test_training_guard_rejects_manifest_referencing_raw_or_mismatched_sha256(
                 "model_licence_review": licence_review,
                 "dataset_versions": {"train": "0.1.0"},
                 "dataset_sha256_hashes": {"datasets/krio/raw/uncleaned.jsonl": real_sha},
+                "dataset_manifest_id": "krio-train-v1",
                 "split_manifest_id": "speaker_splits_v1",
                 "benchmark_id": "bench_v1",
                 "estimated_gpu_hours": 1.0,
@@ -289,6 +291,7 @@ def test_training_guard_rejects_manifest_referencing_raw_or_mismatched_sha256(
                 "dataset_sha256_hashes": {
                     "datasets/krio/cleaned/train.jsonl": "0" * 64
                 },
+                "dataset_manifest_id": "krio-train-v1",
                 "split_manifest_id": "speaker_splits_v1",
                 "benchmark_id": "bench_v1",
                 "estimated_gpu_hours": 1.0,
@@ -300,4 +303,301 @@ def test_training_guard_rejects_manifest_referencing_raw_or_mismatched_sha256(
     )
     with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
         verify_training_manifest(bad_sha_manifest, base_dir=tmp_path)
+
+
+def test_model_licence_review_requires_commercial_permitted():
+    """PA-010: ModelLicenceReview requires commercial_permitted=True when intended_use='commercial'."""
+    from datetime import date
+
+    from sierraleone_ai.training.guard import ModelLicenceReview
+
+    r = ModelLicenceReview(
+        reviewer="rev",
+        reviewed_on=date(2026, 11, 12),
+        licence="CC-BY-NC-4.0",
+        commercial_permitted=False,
+        intended_use="research",
+    )
+    assert r.intended_use == "research"
+
+    with pytest.raises(ValueError, match="commercial_permitted must be True"):
+        ModelLicenceReview(
+            reviewer="rev",
+            reviewed_on=date(2026, 11, 12),
+            licence="CC-BY-NC-4.0",
+            commercial_permitted=False,
+            intended_use="commercial",
+        )
+
+
+def test_training_guard_dry_run_extended_plan():
+    """PA-010: dry-run plan contains eligible_counts, gpu_available, downloads=0, writes=0."""
+    from sierraleone_ai.training.guard import require_training_approval
+
+    plan = require_training_approval("dry_run_task", dry_run=True)
+    assert plan["downloads"] == 0
+    assert plan["writes"] == 0
+    assert isinstance(plan["eligible_counts"], dict)
+    assert "text_training" in plan["eligible_counts"]
+    assert "gpu_available" in plan
+    assert "resolved_config_paths" in plan
+
+
+def test_training_guard_rejects_manifest_for_different_model(
+    tmp_path: Path, monkeypatch
+):
+    """PA-010: Approval manifest base_model_id != selected base model must raise RuntimeError."""
+    import sierraleone_ai.config as cfg_module
+    from sierraleone_ai.training.guard import require_training_approval
+
+    monkeypatch.setattr(cfg_module.settings, "allow_training", True)
+    monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cfg_module.settings, "models_dir", tmp_path / "models")
+
+    # Set up selected_base_model.json with a specific model
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "selected_base_model.json").write_text(
+        json.dumps({
+            "hf_repo": "Qwen/Qwen2.5-3B",
+            "tokenizer_audit_completed": True,
+            "native_benchmark_completed": True,
+        }),
+        encoding="utf-8",
+    )
+
+    # Set up valid dataset files and manifests
+    krio_dir = tmp_path / "krio"
+    clean_file = krio_dir / "validated" / "krio_text_train.jsonl"
+    clean_file.parent.mkdir(parents=True)
+    clean_file.write_text('{"text": "val"}\n', encoding="utf-8")
+    real_sha = hashlib.sha256(clean_file.read_bytes()).hexdigest()
+
+    # Split manifest
+    splits_dir = krio_dir / "splits"
+    splits_dir.mkdir(parents=True)
+    (splits_dir / "speaker_splits_v1.json").write_text(
+        json.dumps({"speaker_to_split": {}}), encoding="utf-8"
+    )
+
+    # Dataset manifest
+    manifests_dir = tmp_path / "datasets" / "manifests"
+    manifests_dir.mkdir(parents=True)
+    ds_manifest = manifests_dir / "krio-train-v1.manifest.json"
+    rel_clean_path = str(clean_file.relative_to(tmp_path)).replace("\\", "/")
+    ds_manifest.write_text(
+        json.dumps({
+            "schema_version": 2,
+            "language": "krio",
+            "split": "train",
+            "version": 1,
+            "files": {rel_clean_path: real_sha},
+            "eligible_counts": {"text_training": 100000},
+            "skipped": {},
+            "built_at": "2026-11-12T00:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    licence_review = {
+        "reviewer": "reviewer1",
+        "reviewed_on": "2026-11-12",
+        "licence": "Apache-2.0",
+        "commercial_permitted": True,
+        "intended_use": "research",
+    }
+    approval_path = tmp_path / "approval.json"
+    approval_path.write_text(
+        json.dumps({
+            "run_id": "run_diff_model",
+            "task": "chat_llm_sft",
+            "base_model_id": "Different/Model-7B",
+            "base_model_revision": "abc1234",
+            "model_licence_review": licence_review,
+            "dataset_versions": {"train": "0.1.0"},
+            "dataset_sha256_hashes": {rel_clean_path: real_sha},
+            "dataset_manifest_id": "krio-train-v1",
+            "split_manifest_id": "speaker_splits_v1",
+            "benchmark_id": "bench_v1",
+            "estimated_gpu_hours": 2.0,
+            "estimated_cost_usd": 4.0,
+            "approver": "project_owner",
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="does not match selected base model"):
+        require_training_approval(
+            "test_task",
+            language="krio",
+            manifest_path=approval_path,
+            task_key="chat_llm_sft",
+            base_dir=tmp_path,
+            check_readiness=False,
+        )
+
+
+def test_training_guard_rejects_file_not_covered_by_dataset_manifest(
+    tmp_path: Path,
+):
+    """PA-010: Manifest referencing a file not covered by dataset manifest must raise."""
+    from sierraleone_ai.training.guard import verify_training_manifest
+
+    krio_dir = tmp_path / "krio"
+    clean_file1 = krio_dir / "validated" / "covered.jsonl"
+    clean_file1.parent.mkdir(parents=True)
+    clean_file1.write_text('{"x": 1}\n', encoding="utf-8")
+    sha1 = hashlib.sha256(clean_file1.read_bytes()).hexdigest()
+
+    clean_file2 = krio_dir / "validated" / "uncovered.jsonl"
+    clean_file2.write_text('{"x": 2}\n', encoding="utf-8")
+    sha2 = hashlib.sha256(clean_file2.read_bytes()).hexdigest()
+
+    rel_p1 = str(clean_file1.relative_to(tmp_path)).replace("\\", "/")
+    rel_p2 = str(clean_file2.relative_to(tmp_path)).replace("\\", "/")
+
+    # Split manifest
+    splits_dir = krio_dir / "splits"
+    splits_dir.mkdir(parents=True)
+    (splits_dir / "speaker_splits_v1.json").write_text(
+        json.dumps({"speaker_to_split": {}}), encoding="utf-8"
+    )
+
+    # Dataset manifest only covers clean_file1
+    manifests_dir = tmp_path / "datasets" / "manifests"
+    manifests_dir.mkdir(parents=True)
+    ds_manifest = manifests_dir / "krio-train-v1.manifest.json"
+    ds_manifest.write_text(
+        json.dumps({
+            "schema_version": 2,
+            "language": "krio",
+            "split": "train",
+            "version": 1,
+            "files": {rel_p1: sha1},
+            "eligible_counts": {"text_training": 10},
+            "skipped": {},
+            "built_at": "2026-11-12T00:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    licence_review = {
+        "reviewer": "reviewer1",
+        "reviewed_on": "2026-11-12",
+        "licence": "Apache-2.0",
+        "commercial_permitted": True,
+        "intended_use": "research",
+    }
+
+    # Approval manifest references both file1 and file2
+    approval_path = tmp_path / "approval_uncovered.json"
+    approval_path.write_text(
+        json.dumps({
+            "run_id": "run_uncovered",
+            "task": "chat_llm_sft",
+            "base_model_id": "Qwen/Qwen2.5-3B",
+            "base_model_revision": "abc1234",
+            "model_licence_review": licence_review,
+            "dataset_versions": {"train": "0.1.0"},
+            "dataset_sha256_hashes": {rel_p1: sha1, rel_p2: sha2},
+            "dataset_manifest_id": "krio-train-v1",
+            "split_manifest_id": "speaker_splits_v1",
+            "benchmark_id": "bench_v1",
+            "estimated_gpu_hours": 1.0,
+            "estimated_cost_usd": 2.0,
+            "approver": "owner",
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="not covered by dataset manifest"):
+        verify_training_manifest(approval_path, base_dir=tmp_path)
+
+
+def test_training_guard_rejects_task_mismatch(tmp_path: Path, monkeypatch):
+    """PA-010: Approval manifest task != requested task_key must raise RuntimeError."""
+    import sierraleone_ai.config as cfg_module
+    from sierraleone_ai.training.guard import require_training_approval
+
+    monkeypatch.setattr(cfg_module.settings, "allow_training", True)
+    monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cfg_module.settings, "models_dir", tmp_path / "models")
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "selected_base_model.json").write_text(
+        json.dumps({
+            "hf_repo": "Qwen/Qwen2.5-3B",
+            "tokenizer_audit_completed": True,
+            "native_benchmark_completed": True,
+        }),
+        encoding="utf-8",
+    )
+
+    krio_dir = tmp_path / "krio"
+    clean_file = krio_dir / "validated" / "krio_text_train.jsonl"
+    clean_file.parent.mkdir(parents=True)
+    clean_file.write_text('{"text": "val"}\n', encoding="utf-8")
+    real_sha = hashlib.sha256(clean_file.read_bytes()).hexdigest()
+
+    splits_dir = krio_dir / "splits"
+    splits_dir.mkdir(parents=True)
+    (splits_dir / "speaker_splits_v1.json").write_text(
+        json.dumps({"speaker_to_split": {}}), encoding="utf-8"
+    )
+
+    manifests_dir = tmp_path / "datasets" / "manifests"
+    manifests_dir.mkdir(parents=True)
+    ds_manifest = manifests_dir / "krio-train-v1.manifest.json"
+    rel_clean_path = str(clean_file.relative_to(tmp_path)).replace("\\", "/")
+    ds_manifest.write_text(
+        json.dumps({
+            "schema_version": 2,
+            "language": "krio",
+            "split": "train",
+            "version": 1,
+            "files": {rel_clean_path: real_sha},
+            "eligible_counts": {"text_training": 100000},
+            "skipped": {},
+            "built_at": "2026-11-12T00:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    licence_review = {
+        "reviewer": "reviewer1",
+        "reviewed_on": "2026-11-12",
+        "licence": "Apache-2.0",
+        "commercial_permitted": True,
+        "intended_use": "research",
+    }
+    approval_path = tmp_path / "approval.json"
+    approval_path.write_text(
+        json.dumps({
+            "run_id": "run_mismatch_task",
+            "task": "chat_llm_cpt",
+            "base_model_id": "Qwen/Qwen2.5-3B",
+            "base_model_revision": "abc1234",
+            "model_licence_review": licence_review,
+            "dataset_versions": {"train": "0.1.0"},
+            "dataset_sha256_hashes": {rel_clean_path: real_sha},
+            "dataset_manifest_id": "krio-train-v1",
+            "split_manifest_id": "speaker_splits_v1",
+            "benchmark_id": "bench_v1",
+            "estimated_gpu_hours": 2.0,
+            "estimated_cost_usd": 4.0,
+            "approver": "project_owner",
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="does not match requested task"):
+        require_training_approval(
+            "test_task",
+            language="krio",
+            manifest_path=approval_path,
+            task_key="chat_llm_sft",
+            base_dir=tmp_path,
+            check_readiness=False,
+        )
 

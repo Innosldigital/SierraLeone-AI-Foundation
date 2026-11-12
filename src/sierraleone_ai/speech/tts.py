@@ -83,6 +83,8 @@ def start_tts_training(
         task=f"{cfg.language} TTS model training ({cfg.base_architecture})",
         language=cfg.language,
         manifest_path=manifest_path,
+        task_key="tts_training",
+        config=cfg,
         dry_run=dry_run,
     )
     if dry_run:

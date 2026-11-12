@@ -86,6 +86,8 @@ def start_asr_training(
         task=f"{cfg.language} ASR model training ({cfg.base_model})",
         language=cfg.language,
         manifest_path=manifest_path,
+        task_key="asr_training",
+        config=cfg,
         dry_run=dry_run,
     )
     if dry_run:

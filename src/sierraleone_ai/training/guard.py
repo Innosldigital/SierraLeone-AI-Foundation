@@ -21,11 +21,12 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sierraleone_ai.config import settings
 
@@ -105,14 +106,26 @@ class ModelLicenceReview(BaseModel):
     """Record of human verification of base model licence terms."""
 
     reviewer: str = Field(..., min_length=1)
-    reviewed_on: str = Field(..., min_length=1)
+    reviewed_on: date = Field(..., description="Date of review (ISO-8601 YYYY-MM-DD)")
     licence: str = Field(..., min_length=1)
     commercial_permitted: bool = False
+    intended_use: str = Field(
+        default="research",
+        description="Intended use ('research' or 'commercial')",
+    )
+
+    @model_validator(mode="after")
+    def validate_commercial_permission(self) -> ModelLicenceReview:
+        if self.intended_use == "commercial" and not self.commercial_permitted:
+            raise ValueError(
+                "commercial_permitted must be True when intended_use is 'commercial'"
+            )
+        return self
 
 
 class TrainingApprovalManifest(BaseModel):
     """
-    Machine-readable training approval manifest (`training/approvals/<run_id>.json`) (SLAI-024).
+    Machine-readable training approval manifest (`training/approvals/<run_id>.json`) (SLAI-024 / PA-010).
     """
 
     run_id: str = Field(..., min_length=1)
@@ -125,6 +138,11 @@ class TrainingApprovalManifest(BaseModel):
         ...,
         min_length=1,
         description="Map of dataset file path -> 64-char SHA-256 hex digest",
+    )
+    dataset_manifest_id: str = Field(
+        ...,
+        min_length=1,
+        description="ID of the dataset manifest from build-manifest (PA-001 / PA-010)",
     )
     split_manifest_id: str = Field(..., min_length=1)
     benchmark_id: str = Field(..., min_length=1)
@@ -162,10 +180,14 @@ class TrainingApprovalManifest(BaseModel):
 def verify_training_manifest(
     manifest_path: Path,
     base_dir: Path | None = None,
+    language: str = "krio",
+    split: str = "train",
 ) -> TrainingApprovalManifest:
     """
-    Load and verify a TrainingApprovalManifest on disk, checking that every
-    referenced dataset file exists (outside `raw/`) and matches its SHA-256 hash.
+    Load and verify a TrainingApprovalManifest on disk (PA-010):
+    1. Every referenced dataset file exists (outside `raw/`) and matches its SHA-256 hash.
+    2. Split manifest file exists.
+    3. Dataset manifest exists, matches dataset_manifest_id, and covers all dataset files.
     """
     if not manifest_path.exists():
         raise RuntimeError(
@@ -193,6 +215,77 @@ def verify_training_manifest(
                 f"[TRAINING GUARD] Dataset SHA-256 mismatch for '{rel_or_abs}': "
                 f"expected {expected_sha.lower()}, got {actual_sha}"
             )
+
+    # Verify split manifest existence
+    candidate_split = Path(manifest.split_manifest_id)
+    split_file: Path | None = None
+    if candidate_split.is_absolute() and candidate_split.exists():
+        split_file = candidate_split
+    elif (root / candidate_split).exists():
+        split_file = root / candidate_split
+    elif (root / "datasets" / language / "splits" / f"{manifest.split_manifest_id}.json").exists():
+        split_file = root / "datasets" / language / "splits" / f"{manifest.split_manifest_id}.json"
+    elif (root / language / "splits" / f"{manifest.split_manifest_id}.json").exists():
+        split_file = root / language / "splits" / f"{manifest.split_manifest_id}.json"
+    elif (root / "datasets" / language / "splits" / manifest.split_manifest_id).exists():
+        split_file = root / "datasets" / language / "splits" / manifest.split_manifest_id
+    elif (root / language / "splits" / manifest.split_manifest_id).exists():
+        split_file = root / language / "splits" / manifest.split_manifest_id
+    elif (root / "datasets" / "splits" / manifest.split_manifest_id).exists():
+        split_file = root / "datasets" / "splits" / manifest.split_manifest_id
+    elif (root / "splits" / manifest.split_manifest_id).exists():
+        split_file = root / "splits" / manifest.split_manifest_id
+
+    if split_file is None:
+        raise RuntimeError(
+            f"[TRAINING GUARD] Split manifest file missing: '{manifest.split_manifest_id}'"
+        )
+
+    # Verify dataset manifest exists and matches
+    from sierraleone_ai.datasets.manifest import latest_manifest_path, load_manifest
+
+    dm_path = root / "datasets" / "manifests" / f"{manifest.dataset_manifest_id}.manifest.json"
+    if not dm_path.exists():
+        dm_path = root / "datasets" / "manifests" / manifest.dataset_manifest_id
+    if not dm_path.exists():
+        dm_path = root / "manifests" / f"{manifest.dataset_manifest_id}.manifest.json"
+    if not dm_path.exists():
+        dm_path = root / "manifests" / manifest.dataset_manifest_id
+    if not dm_path.exists():
+        manifests_folder = (root / "datasets" / "manifests") if base_dir else None
+        active_dm = latest_manifest_path(language, split, out_dir=manifests_folder)
+        if active_dm is not None:
+            dm_path = active_dm
+
+    if not dm_path.exists():
+        raise RuntimeError(
+            f"[TRAINING GUARD] Dataset manifest '{manifest.dataset_manifest_id}' not found."
+        )
+
+    ds_manifest = load_manifest(dm_path)
+    if manifest.dataset_manifest_id != ds_manifest.manifest_id:
+        raise RuntimeError(
+            f"[TRAINING GUARD] Approval manifest dataset_manifest_id ('{manifest.dataset_manifest_id}') "
+            f"does not match active dataset manifest ('{ds_manifest.manifest_id}')"
+        )
+
+    # Verify training approval manifest files are covered by dataset manifest
+    ds_files_norm = {
+        str(PurePosixPath(p.replace("\\", "/"))): h for p, h in ds_manifest.files.items()
+    }
+    for file_path in manifest.dataset_sha256_hashes:
+        norm_fp = str(PurePosixPath(file_path.replace("\\", "/")))
+        if norm_fp not in ds_files_norm:
+            try:
+                rel = str(PurePosixPath(Path(file_path).relative_to(root).as_posix()))
+            except ValueError:
+                rel = norm_fp
+            if rel not in ds_files_norm:
+                raise RuntimeError(
+                    f"[TRAINING GUARD] Training approval manifest references file '{file_path}' "
+                    f"not covered by dataset manifest '{ds_manifest.manifest_id}'"
+                )
+
     return manifest
 
 
@@ -256,25 +349,69 @@ def require_training_approval(
     language: str = "krio",
     manifest_path: Path | None = None,
     *,
+    task_key: str | None = None,
+    config: Any = None,
     check_readiness: bool = True,
     dry_run: bool = False,
+    base_dir: Path | None = None,
 ) -> dict[str, Any]:
     """
     Raise RuntimeError if training prerequisites are not met (unless dry_run=True).
 
     When `dry_run=True`, inspects and returns the structured training readiness plan
-    without downloading weights, writing files, or starting training (SLAI-024).
+    without downloading weights, writing files, or starting training (SLAI-024 / PA-010).
     """
     from sierraleone_ai.evaluation.benchmarks import assert_held_out_integrity
     from sierraleone_ai.models.registry import get_recommended
 
     readiness = check_dataset_readiness(language)
-    recommended = get_recommended()
+    decision_file = (base_dir or settings.models_dir) / "selected_base_model.json"
+    recommended = get_recommended(decision_file=decision_file)
     held_out_ok = assert_held_out_integrity(language)
+
+    # GPU presence check
+    gpu_available = False
+    device_name = None
+    try:
+        import torch
+
+        gpu_available = bool(torch.cuda.is_available())
+        if gpu_available:
+            device_name = str(torch.cuda.get_device_name(0))
+    except (ImportError, Exception):
+        pass
+
+    # Resolve config data paths
+    resolved_config_paths: list[str] = []
+    if config is not None:
+        for attr in (
+            "train_data_path",
+            "val_data_path",
+            "conversations_path",
+            "translations_path",
+            "manifest_path",
+        ):
+            val = getattr(config, attr, None)
+            if val is not None:
+                resolved_config_paths.append(str(val))
+
+    # Determine tokenizer id
+    tokenizer_id: str | None = None
+    if recommended is not None:
+        tokenizer_id = recommended.hf_repo
+    elif config is not None and getattr(config, "base_model_repo", None):
+        tokenizer_id = str(config.base_model_repo)
+
+    approval_manifest: TrainingApprovalManifest | None = None
+    if manifest_path is not None:
+        approval_manifest = verify_training_manifest(
+            manifest_path, base_dir=base_dir, language=language
+        )
 
     plan: dict[str, Any] = {
         "dry_run": dry_run,
         "task": task,
+        "task_key": task_key,
         "language": language,
         "allow_training_env": settings.allow_training,
         "manifest_path": str(manifest_path) if manifest_path else None,
@@ -284,6 +421,16 @@ def require_training_approval(
             k: {"have": v.have, "need": v.need, "ok": v.ok}
             for k, v in readiness.items()
         },
+        "eligible_counts": {
+            _READINESS_TASKS.get(k, k): v.have for k, v in readiness.items()
+        },
+        "downloads": 0,
+        "writes": 0,
+        "gpu_available": gpu_available,
+        "device_name": device_name,
+        "tokenizer_id": tokenizer_id,
+        "resolved_config_paths": resolved_config_paths,
+        "estimated_gpu_hours": approval_manifest.estimated_gpu_hours if approval_manifest else None,
         "ready_to_train": False,
     }
 
@@ -299,11 +446,7 @@ def require_training_approval(
             f"All prerequisites (approval manifest, dataset thresholds, base model) must also pass.\n"
         )
 
-    # 2. If a manifest_path is explicitly provided, validate it immediately
-    if manifest_path is not None:
-        verify_training_manifest(manifest_path)
-
-    # 3. Dataset readiness
+    # 2. Dataset readiness
     if check_readiness:
         failures = [str(item) for item in readiness.values() if not item.ok]
         if failures:
@@ -313,8 +456,8 @@ def require_training_approval(
                 + "\n\nSee documentation/DATA_COLLECTION_GUIDE.md for collection instructions."
             )
 
-    # 4. Require machine-readable approval manifest (SLAI-024)
-    if manifest_path is None:
+    # 3. Require machine-readable approval manifest (SLAI-024)
+    if manifest_path is None or approval_manifest is None:
         raise RuntimeError(
             f"[TRAINING GUARD] '{task}' blocked — missing approval manifest.\n"
             "Provide a verified `training/approvals/<run_id>.json` manifest path "
@@ -323,19 +466,45 @@ def require_training_approval(
             "estimated_gpu_hours, estimated_cost_usd, and approver."
         )
 
-    # 5. Held-out benchmark integrity
+    # 4. Manifest task matches requested task
+    if task_key is not None and approval_manifest.task != task_key:
+        raise RuntimeError(
+            f"[TRAINING GUARD] Approval manifest task ('{approval_manifest.task}') "
+            f"does not match requested task ('{task_key}')."
+        )
+
+    # 5. Base model selection matches manifest base_model_id
+    if recommended is None or recommended.hf_repo != approval_manifest.base_model_id:
+        selected_repo = recommended.hf_repo if recommended else None
+        raise RuntimeError(
+            f"[TRAINING GUARD] Approval manifest base_model_id ('{approval_manifest.base_model_id}') "
+            f"does not match selected base model ('{selected_repo}')."
+        )
+
+    # 6. Config's data paths must be ⊆ manifest's hashed files
+    if config is not None and resolved_config_paths:
+        root = base_dir or settings.project_root
+        manifest_files_norm = {
+            str(PurePosixPath(p.replace("\\", "/"))): p
+            for p in approval_manifest.dataset_sha256_hashes
+        }
+        for cfg_path in resolved_config_paths:
+            norm_p = str(PurePosixPath(cfg_path.replace("\\", "/")))
+            if norm_p not in manifest_files_norm:
+                try:
+                    rel = str(PurePosixPath(Path(cfg_path).relative_to(root).as_posix()))
+                except ValueError:
+                    rel = norm_p
+                if rel not in manifest_files_norm:
+                    raise RuntimeError(
+                        f"[TRAINING GUARD] Config data path '{cfg_path}' is not covered by "
+                        f"approval manifest dataset_sha256_hashes."
+                    )
+
+    # 7. Held-out benchmark integrity
     if check_readiness and not held_out_ok:
         raise RuntimeError(
             f"[TRAINING GUARD] '{task}' blocked — held-out benchmark integrity check failed."
-        )
-
-    # 6. Base model selection
-    if recommended is None:
-        raise RuntimeError(
-            f"[TRAINING GUARD] '{task}' blocked — no base model selected.\n"
-            f"Complete the tokenisation audit in research/model_comparison.md,\n"
-            f"record the decision in models/selected_base_model.json,\n"
-            f"and get approval before training."
         )
 
     plan["ready_to_train"] = True

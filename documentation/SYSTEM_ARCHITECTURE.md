@@ -44,7 +44,7 @@ graph TD
 - **registry.py** – Candidate base model metadata (no weights downloaded)
 
 ### 5. `sierraleone_ai.training`
-- **guard.py** – Safety gate preventing accidental training
+- **guard.py** – Safety gate preventing accidental training. The guard prevents accidental spend and unreviewed data; it is not an access-control system — anyone with repo write access can author a manifest.
 
 ### 6. `sierraleone_ai.api`
 - **app.py** – FastAPI application with stub endpoints
