@@ -28,7 +28,7 @@ These rules override everything else. Never break them.
 2. **Never confuse Sierra Leonean Krio with Nigerian Pidgin, Liberian English,
    Cameroon Pidgin, or Ghanaian Pidgin.** They are distinct languages/creoles.
    Krio uses `duya` ("please"), `padi`/`bo` ("friend"), `ɛnti`/`noto so`
-   (tag question) — not `abeg`, `chale`, or `shey`.
+   (tag question) — not `abeg`, `chale`, or `shey`. *(Note: specific word usages and spellings are pending native speaker review — see docs/NATIVE_REVIEW_QUEUE.md).*
 
 3. **Never claim a model is trained, operational, or fluent** unless it has been
    explicitly trained, evaluated by native speakers, and approved. All API
@@ -75,7 +75,7 @@ SierraLeone-AI-Foundation/
 ├── training/                  ← Training configs (JSON)
 ├── documentation/             ← Full project documentation
 ├── research/                  ← Base model comparison notes
-├── tests/                     ← pytest suite (35 tests, all passing)
+├── tests/                     ← pytest suite (212 tests, all passing)
 ├── api/                       ← FastAPI entrypoint for deployment
 ├── pyproject.toml             ← Project metadata and dependencies
 ├── .env.example               ← Environment variable template
@@ -124,6 +124,7 @@ pip install -e ".[training]"
 | [`src/sierraleone_ai/training/pipeline.py`](src/sierraleone_ai/training/pipeline.py) | CPT + SFT + LoRA pipeline configurations and guarded entry points |
 | [`src/sierraleone_ai/speech/asr.py`](src/sierraleone_ai/speech/asr.py) | ASR infrastructure + speaker leakage audit |
 | [`src/sierraleone_ai/speech/tts.py`](src/sierraleone_ai/speech/tts.py) | TTS training quality checks |
+| [`src/sierraleone_ai/serving/state.py`](src/sierraleone_ai/serving/state.py) | In-memory model serving state (drives `/health/ready`) |
 | [`src/sierraleone_ai/api/app.py`](src/sierraleone_ai/api/app.py) | FastAPI app — all model endpoints return 503 until operational |
 | [`src/sierraleone_ai/config.py`](src/sierraleone_ai/config.py) | Settings — all env vars prefixed `SLAI_` |
 
@@ -151,11 +152,11 @@ Example: `datasets/krio/cleaned/krio_text_train.jsonl`
 
 ## Adding a New Language
 
-1. Add the language to `SUPPORTED_LANGUAGES` in `src/sierraleone_ai/__init__.py`
-2. Create the directory structure: `datasets/{language_code}/{raw,cleaned,validated,translations,conversations,audio}/`
+1. Add the language to `LANGUAGE_REGISTRY` and `SUPPORTED_LANGUAGES` in `src/sierraleone_ai/__init__.py` and to the `Language` enum in `src/sierraleone_ai/datasets/schema.py`.
+2. Create the directory structure: `datasets/{language_code}/{raw,cleaned,validated,translations,conversations,audio,splits}/`
 3. Add a `.gitkeep` with a comment to the top-level language directory
 4. Add a benchmark directory: `benchmarks/{language_code}/`
-5. No changes to the API, schemas, or core pipeline are needed — they are already multilingual.
+5. Add loader and normalisation entries as needed.
 
 ---
 
@@ -163,7 +164,7 @@ Example: `datasets/krio/cleaned/krio_text_train.jsonl`
 
 1. Add the request/response Pydantic models to `src/sierraleone_ai/api/models.py`
 2. Add the endpoint to `src/sierraleone_ai/api/app.py`
-3. If the model is not yet operational, raise `_MODEL_NOT_READY` (HTTP 503)
+3. If the model is not yet operational, raise `_model_not_ready()` (HTTP 503)
 4. Add a `test_*_returns_503` test to `tests/test_api.py`
 5. Document the endpoint in `documentation/API_DOCUMENTATION.md`
 
@@ -182,7 +183,7 @@ pytest tests/test_schema.py -v
 pytest -v --cov=sierraleone_ai --cov-report=term-missing
 ```
 
-**Test files (110+ tests, all passing):**
+**Test files (212 tests, all passing):**
 - `tests/test_schema.py` — Pydantic schema validation, provenance rules, reviewer signoffs
 - `tests/test_normalizer.py` — Krio normaliser, orthography profiling, creole contamination detection
 - `tests/test_metrics.py` — BLEU (smoothed), CER, WER + native speaker eval forms
@@ -230,9 +231,9 @@ pytest -v --cov=sierraleone_ai --cov-report=term-missing
 | TTS infrastructure stubs | ✅ Scaffolded with strict studio quality gates |
 | Training pipeline stubs (CPT + SFT + LoRA) | ✅ Scaffolded & guarded with dataset thresholds |
 | Native speaker evaluation framework | ✅ Validated |
-| FastAPI (6 endpoints, all correctly stubbed) | ✅ Running (informative 503s + 422 validations) |
+| FastAPI (8 endpoints, all correctly stubbed) | ✅ Running (informative 503s + 422 validations) |
 | `slai` CLI | ✅ Installed & functional |
-| Unit test suite | ✅ 110/110 passing |
+| Unit test suite | ✅ 212/212 passing |
 | Full documentation suite (10 docs) | ✅ Written & audited |
 | **Krio training data** | 🔴 Collection required |
 | **Base model selection** | 🟡 Tokenisation audit required |

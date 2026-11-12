@@ -6,13 +6,17 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: "Python ${{ matrix.python-version }}"
-    runs-on: ubuntu-latest
+    name: "Python ${{ matrix.python-version }} on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.12", "3.13"]
 
     steps:
@@ -29,20 +33,18 @@ jobs:
           pip install -e ".[dev,eval]"
 
       - name: Lint with ruff
-        run: ruff check src tests
+        run: ruff check src tests scripts
 
       - name: Type-check with mypy
-        run: mypy src
+        run: mypy src tests scripts
 
       - name: Run tests with coverage
         run: pytest -v --cov=sierraleone_ai --cov-report=term-missing
 
-      - name: Check no Krio text in tests
-        # Fail if any test file contains a suspected unreviewed Krio sentence.
-        # Krio text should ONLY appear in docs with <!-- UNVERIFIED --> markers.
-        # This grep looks for Krio-specific patterns in test files.
+      - name: Check no Krio text in tests (PA-015)
+        shell: bash
         run: |
-          if grep -rn "Kusheh\|duya\|bo,\|padi\|maket\|Aw di" tests/; then
+          if grep -rwnF -f tests/krio_strings_denylist.txt tests/; then
             echo "ERROR: Potential unreviewed Krio text found in test files."
             echo "Replace with neutral fixture strings like TEST_FIXTURE_TEXT_001."
             exit 1
@@ -50,6 +52,7 @@ jobs:
           echo "OK: No unreviewed Krio text detected in test files."
 
       - name: Check datasets and benchmarks track only allowed files (PA-006)
+        shell: bash
         run: |
           disallowed=$(git ls-files datasets benchmarks | grep -v -E '(\.gitkeep$|example_.*\.jsonl$|source_register\.csv$|.*schema.*\.jsonl$|manifests/.*\.manifest\.json$)') || true
           if [ -n "$disallowed" ]; then
@@ -60,6 +63,7 @@ jobs:
           echo "OK: datasets and benchmarks track only allowed templates, keepfiles, register, and manifests."
 
       - name: Reject committed secrets, .env, virtualenvs, caches, or model weights (SLAI-018 / SLAI-021)
+        shell: bash
         run: |
           if git ls-files --error-unmatch .env >/dev/null 2>&1; then
             echo "ERROR: .env is tracked in git!"
@@ -74,4 +78,3 @@ jobs:
             exit 1
           fi
           echo "OK: Repository hygiene and secret checks passed."
-

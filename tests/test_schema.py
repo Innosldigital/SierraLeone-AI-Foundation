@@ -1,4 +1,5 @@
 """Tests for dataset schema validation, consent/provenance model, and record integrity (SLAI-013 / SLAI-025 / SLAI-026 / SLAI-028)."""
+
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -272,12 +273,16 @@ class TestConversationAndAgriculturalRecords:
     def test_conversation_num_turns(self):
         turns = [
             ConversationTurn(
-                speaker="user", language=Language.KRIO,
-                text="TEST_FIXTURE_TURN_A", turn_index=0,
+                speaker="user",
+                language=Language.KRIO,
+                text="TEST_FIXTURE_TURN_A",
+                turn_index=0,
             ),
             ConversationTurn(
-                speaker="assistant", language=Language.KRIO,
-                text="TEST_FIXTURE_TURN_B", turn_index=1,
+                speaker="assistant",
+                language=Language.KRIO,
+                text="TEST_FIXTURE_TURN_B",
+                turn_index=1,
             ),
         ]
         conv = ConversationRecord(
@@ -290,12 +295,16 @@ class TestConversationAndAgriculturalRecords:
     def test_conversation_non_contiguous_turns_rejected(self):
         turns = [
             ConversationTurn(
-                speaker="user", language=Language.KRIO,
-                text="TEST_FIXTURE_TURN_A", turn_index=0,
+                speaker="user",
+                language=Language.KRIO,
+                text="TEST_FIXTURE_TURN_A",
+                turn_index=0,
             ),
             ConversationTurn(
-                speaker="assistant", language=Language.KRIO,
-                text="TEST_FIXTURE_TURN_B", turn_index=2,  # gap!
+                speaker="assistant",
+                language=Language.KRIO,
+                text="TEST_FIXTURE_TURN_B",
+                turn_index=2,  # gap!
             ),
         ]
         with pytest.raises((ValidationError, ValueError), match="contiguous"):
@@ -308,12 +317,16 @@ class TestConversationAndAgriculturalRecords:
     def test_conversation_language_mismatch_rejected(self):
         turns = [
             ConversationTurn(
-                speaker="user", language=Language.MENDE,
-                text="TEST_FIXTURE_TURN_A", turn_index=0,
+                speaker="user",
+                language=Language.MENDE,
+                text="TEST_FIXTURE_TURN_A",
+                turn_index=0,
             ),
             ConversationTurn(
-                speaker="assistant", language=Language.MENDE,
-                text="TEST_FIXTURE_TURN_B", turn_index=1,
+                speaker="assistant",
+                language=Language.MENDE,
+                text="TEST_FIXTURE_TURN_B",
+                turn_index=1,
             ),
         ]
         with pytest.raises((ValidationError, ValueError), match="metadata.language"):
@@ -326,12 +339,16 @@ class TestConversationAndAgriculturalRecords:
     def test_agricultural_conversation_record(self):
         turns = [
             ConversationTurn(
-                speaker="user", language=Language.KRIO,
-                text="TEST_FIXTURE_AGRI_Q", turn_index=0,
+                speaker="user",
+                language=Language.KRIO,
+                text="TEST_FIXTURE_AGRI_Q",
+                turn_index=0,
             ),
             ConversationTurn(
-                speaker="assistant", language=Language.KRIO,
-                text="TEST_FIXTURE_AGRI_A", turn_index=1,
+                speaker="assistant",
+                language=Language.KRIO,
+                text="TEST_FIXTURE_AGRI_A",
+                turn_index=1,
             ),
         ]
         agri = AgriculturalConversationRecord(
@@ -384,6 +401,7 @@ class TestVerifiedSpeechTranscriptionRecord:
         audio_file.parent.mkdir(parents=True)
         audio_file.write_bytes(b"RIFF....WAVEfmt ")
         import hashlib
+
         sha = hashlib.sha256(b"RIFF....WAVEfmt ").hexdigest()
 
         rec = AudioRecord(
@@ -458,3 +476,44 @@ class TestVerifiedSpeechTranscriptionRecord:
                 transcriber_id="annotator_01",
                 verifier_id="annotator_02",
             )
+
+
+class TestDatasetFormatDocExamples:
+    def test_all_json_blocks_in_dataset_format_doc_validate(self):
+        """PA-017: Every JSON code block in documentation/DATASET_FORMAT.md must validate."""
+        import json
+        import re
+        from pathlib import Path
+
+        from sierraleone_ai.datasets.schema import (
+            AudioRecord,
+            BenchmarkItem,
+            ConversationRecord,
+            KrioTextRecord,
+            TranslationRecord,
+        )
+
+        doc_path = Path(__file__).resolve().parents[1] / "documentation" / "DATASET_FORMAT.md"
+        assert doc_path.exists()
+        content = doc_path.read_text(encoding="utf-8")
+
+        pattern = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
+        blocks = pattern.findall(content)
+        assert len(blocks) >= 5, f"Expected at least 5 JSON examples in doc, found {len(blocks)}"
+
+        models = (KrioTextRecord, TranslationRecord, ConversationRecord, AudioRecord, BenchmarkItem)
+        validated_count = 0
+        for block in blocks:
+            data = json.loads(block)
+            matched = False
+            for model_cls in models:
+                try:
+                    model_cls.model_validate(data)
+                    matched = True
+                    validated_count += 1
+                    break
+                except Exception:
+                    pass
+            assert matched, f"JSON block failed to validate against any schema model:\n{block}"
+
+        assert validated_count == len(blocks)

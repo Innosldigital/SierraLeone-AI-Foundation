@@ -6,9 +6,10 @@ The Sierra Leone AI Foundation is an independent research and development
 platform for language AI covering Sierra Leone's languages: **Krio** (primary),
 Mende, Temne, Limba, Loko, Kono, Kissi and others.
 
-The first working model — **CAFP Krio AI** — will be a Krio language model
-built by adapting an open-weight multilingual base model through continued
-pre-training and instruction fine-tuning.
+The first working model — **CAFP Krio AI** — follows an experiment ladder:
+zero/few-shot candidate baseline evaluation against locked benchmarks, followed by
+supervised fine-tuning (SFT) with LoRA adapters on native-reviewed data, and optional
+continued pretraining (CPT) only if justified by benchmark gap analysis.
 
 ---
 
@@ -50,18 +51,20 @@ pre-training and instruction fine-tuning.
 ```
 SierraLeone-AI-Foundation/
 ├── datasets/           # Language datasets (raw, cleaned, validated)
-├── models/             # Model weights and configs (not committed to git)
-├── training/           # Training pipeline configurations
+├── models/             # Model candidate registry and decisions (weights excluded from git)
+├── training/           # Training pipeline configurations and readiness thresholds
 ├── benchmarks/         # Held-out evaluation sets (never trained on)
 ├── src/
 │   └── sierraleone_ai/ # Python package
-│       ├── api/        # FastAPI application
-│       ├── datasets/   # Dataset loading and schemas
-│       ├── evaluation/ # Evaluation metrics and human eval forms
-│       ├── models/     # Model registry and stubs
-│       ├── preprocessing/ # Text normalisation
-│       └── training/   # Training pipeline stubs
-├── tests/              # Unit tests
+│       ├── api/        # FastAPI application (stubs until models are live)
+│       ├── datasets/   # Dataset loading, schemas, eligibility, and manifests
+│       ├── evaluation/ # Evaluation metrics, reporting, and native speaker forms
+│       ├── models/     # Model candidate registry and tokeniser audit
+│       ├── preprocessing/ # Text normalisation and speaker-aware split manager
+│       ├── serving/    # In-memory model serving state (drives /health/ready)
+│       ├── speech/     # ASR and TTS audio quality infrastructure
+│       └── training/   # Training pipeline & safety guard
+├── tests/              # Unit and integration test suite
 ├── documentation/      # Full documentation
 ├── research/           # Research notes and model comparisons
 └── api/                # API deployment configs
@@ -78,10 +81,11 @@ python -m venv .venv
 # source .venv/bin/activate  # Linux/macOS
 
 # 2. Install the package in development mode
-pip install -e ".[dev]"
+pip install -e ".[dev,eval]"
 
 # 3. Copy and configure environment
-copy .env.example .env
+copy .env.example .env      # Windows
+# cp .env.example .env      # Linux/macOS
 
 # 4. Run tests
 pytest
@@ -89,8 +93,8 @@ pytest
 # 5. Check project status
 slai status
 
-# 6. Start the API (stubs only – no model is live)
-uvicorn sierraleone_ai.api.app:app --reload
+# 6. Start the API (stubs only – returns 503 until models are operational)
+slai serve
 ```
 
 ---

@@ -3,8 +3,10 @@ Tests for the CLI commands (SLAI-017 / SLAI-020).
 
 Uses typer's CliRunner to invoke commands without a live process.
 """
+
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -43,6 +45,7 @@ class TestCLI:
     def test_build_manifest_exits_zero(self, tmp_path: Path, monkeypatch):
         """PA-001: build-manifest command builds a valid manifest and exits zero."""
         import sierraleone_ai.config as cfg_module
+
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
         result = runner.invoke(app, ["build-manifest", "krio", "--split", "train"])
         assert result.exit_code == 0, f"build-manifest command failed: {result.output}"
@@ -134,10 +137,43 @@ class TestCLI:
 
     def test_validate_file_valid(self, tmp_path: Path):
         test_file = tmp_path / "valid.jsonl"
-        test_file.write_text('{"metadata": {"valid": true}, "text": "sample"}\n', encoding="utf-8")
-        result = runner.invoke(app, ["validate-file", str(test_file)])
-        assert result.exit_code == 0
-        assert "Valid lines: 1" in result.output
+        valid_rec = {
+            "metadata": {
+                "record_id": "01234567-89ab-4cde-8f01-23456789abcd",
+                "language": "krio",
+                "source": "test_fixture_approved_source",
+                "collection_date": "2024-01-01",
+                "licence": "CC-BY-4.0",
+                "licence_id": "CC-BY-4.0",
+                "validation_status": "validated",
+                "dataset_version": "0.1.0",
+                "split": "train",
+                "contributor_consent": True,
+                "consent_scope": ["text_training"],
+                "training_permitted": True,
+                "redistribution_permitted": True,
+                "reviews": [
+                    {
+                        "reviewer_id": "REV_01",
+                        "is_native_speaker_of_record_language": True,
+                        "reviewed_on": "2024-01-02",
+                        "verdict": "approve",
+                    },
+                    {
+                        "reviewer_id": "REV_02",
+                        "is_native_speaker_of_record_language": True,
+                        "reviewed_on": "2024-01-02",
+                        "verdict": "approve",
+                    },
+                ],
+            },
+            "text": "TEST_FIXTURE_VALID",
+            "script": "Latin",
+        }
+        test_file.write_text(json.dumps(valid_rec) + "\n", encoding="utf-8")
+        result = runner.invoke(app, ["validate-file", str(test_file), "--kind", "text"])
+        assert result.exit_code == 0, f"Command output:\n{result.output}"
+        assert "Valid and eligible records: 1" in result.output
 
     def test_validate_file_not_found(self):
         result = runner.invoke(app, ["validate-file", "nonexistent_file_path.jsonl"])

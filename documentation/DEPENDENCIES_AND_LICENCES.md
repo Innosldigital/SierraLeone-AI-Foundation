@@ -16,10 +16,10 @@ All dependencies use permissive or standard open-source licences compatible with
 |---|---|---|---|
 | `pydantic` | `>=2.5` | MIT | Dataset schema validation, provenance enforcement, API request/response validation |
 | `pydantic-settings` | `>=2.1` | MIT | Environment variable and `.env` configuration management |
-| `jsonschema` | `>=4.21` | MIT | JSON Schema validation and export |
 | `ftfy` | `>=6.1` | Apache-2.0 | Unicode mojibake repair and text normalisation |
 | `fastapi` | `>=0.109` | MIT | Modular REST API framework (`/generate`, `/translate`, `/transcribe`, `/synthesize`, `/languages`, `/health`) |
 | `uvicorn` | `>=0.25` | BSD-3-Clause | ASGI web server for FastAPI |
+| `python-multipart` | `>=0.0.9` | MIT | Form-data and audio file upload parsing for `/transcribe` |
 | `rich` | `>=13.7` | MIT | Terminal formatting and CLI status tables |
 | `loguru` | `>=0.7` | MIT | Structured logging |
 | `typer` | `>=0.9` | MIT | `slai` command-line interface |
