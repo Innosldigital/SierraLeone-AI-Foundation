@@ -479,6 +479,34 @@ class QAPairRecord(BaseModel):
     is_factual: bool = True
 
 
+class BenchmarkItem(BaseModel):
+    """
+    A held-out evaluation benchmark item (PA-004).
+    Must belong to split=DataSplit.HELD_OUT, with verified native-speaker reference(s).
+    """
+
+    metadata: DatasetMetadata
+    item_id: str = Field(..., min_length=1)
+    evaluation_category: str = Field(..., min_length=1)
+    prompt: str = Field(..., min_length=1)
+    references: list[str] = Field(
+        ...,
+        min_length=1,
+        description="One or more gold reference responses (multiple allowed for orthographic variants)",
+    )
+    reference_notes: str | None = None
+    review_count: int = Field(default=0, ge=0)
+    benchmark_version: str = Field(default="0.1.0", pattern=r"^\d+\.\d+\.\d+$")
+
+    @model_validator(mode="after")
+    def verify_held_out_split(self) -> BenchmarkItem:
+        if self.metadata.split is not DataSplit.HELD_OUT:
+            raise ValueError(
+                f"BenchmarkItem must have metadata.split=DataSplit.HELD_OUT, got '{self.metadata.split.value}'"
+            )
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Audio record schemas (SLAI-026 / SLAI-028)
 # ---------------------------------------------------------------------------

@@ -22,11 +22,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-_TEMPLATE_PREFIXES = (
-    "SCHEMA_TEMPLATE",
-    "BENCHMARK_SCHEMA_TEMPLATE",
-    "EXAMPLE_PLACEHOLDER",
-)
+from sierraleone_ai.datasets.constants import TEMPLATE_PREFIXES
+
+_TEMPLATE_PREFIXES = TEMPLATE_PREFIXES
 
 
 class TokenizerLike(Protocol):

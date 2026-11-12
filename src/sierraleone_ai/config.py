@@ -50,6 +50,7 @@ class Settings(BaseSettings):
 
     # Safety gate – prevents accidental expensive training
     allow_training: bool = False
+    min_benchmark_items: int = 300  # Minimum validated held-out benchmark items before training (PA-004)
 
     # HuggingFace token — stored as SecretStr so it never appears in repr/logs.
     # Accepts both HF_TOKEN (standard HuggingFace convention) and SLAI_HF_TOKEN.

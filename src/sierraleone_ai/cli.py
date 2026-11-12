@@ -87,6 +87,23 @@ def build_manifest(
 
 
 @app.command()
+def build_benchmark_manifest(
+    language: str = typer.Argument("krio", help="Language code"),
+) -> None:
+    """Build a versioned, hash-verified manifest for the held-out benchmark (PA-004)."""
+    from sierraleone_ai.evaluation.benchmarks import (
+        build_benchmark_manifest as _build_benchmark_manifest,
+    )
+
+    try:
+        manifest_path = _build_benchmark_manifest(language=language)
+        console.print(f"[bold green]Benchmark manifest built:[/bold green] {manifest_path}")
+    except Exception as exc:
+        console.print(f"[red]Error building benchmark manifest: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command()
 def check_readiness(
     language: str = typer.Argument("krio", help="Language code"),
     dry_run: bool = typer.Option(
