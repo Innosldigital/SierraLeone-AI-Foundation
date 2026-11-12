@@ -1,10 +1,12 @@
 """
-Tests for the model registry (SLAI-005 / SLAI-017).
+Tests for the model registry (SLAI-005 / SLAI-017 / PA-005).
 
 Verifies that:
 - get_recommended() returns None (no model is approved yet).
 - Every candidate has hf_repo and source_url fields populated.
 - Aya-23 African language support is not falsely claimed.
+- Documented Krio support requires evidence_url.
+- Tiny Aya and DONDO checkpoints are registered with truthful descriptions.
 """
 from __future__ import annotations
 
@@ -12,8 +14,10 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from sierraleone_ai.models.registry import (
+    CandidateModel,
     get_all_candidates,
     get_recommended,
     list_candidates,
@@ -44,7 +48,7 @@ class TestRegistry:
         assert selected.hf_repo == "Qwen/Qwen3-4B"
 
     def test_task_separation_and_2025_candidates(self):
-        """SLAI-032: Candidates are separated by task and include 2025/2026 open-weight models."""
+        """SLAI-032 / PA-005: Candidates are separated by task and include verified models."""
         all_repos = {c.hf_repo for c in get_all_candidates()}
         for expected_repo in (
             "Qwen/Qwen3-4B",
@@ -56,12 +60,17 @@ class TestRegistry:
             "facebook/nllb-200-distilled-600M",
             "openai/whisper-small",
             "facebook/mms-tts",
+            "CohereLabs/tiny-aya-base",
+            "CohereLabs/tiny-aya-global",
+            "CohereLabs/tiny-aya-earth",
+            "KhayaAI/w2v-bert-men",
+            "KhayaAI/w2v-bert-tem",
         ):
             assert expected_repo in all_repos, f"Missing {expected_repo} in registry"
 
         assert len(list_candidates("chat_llm")) >= 6
         assert len(list_candidates("translation_seq2seq")) >= 1
-        assert len(list_candidates("asr")) >= 1
+        assert len(list_candidates("asr")) >= 3
         assert len(list_candidates("tts")) >= 1
 
     def test_every_candidate_has_hf_repo(self):
@@ -76,6 +85,51 @@ class TestRegistry:
                 f"Candidate '{candidate.name}' has no source_url set"
             )
 
+    def test_krio_support_documented_requires_evidence_url(self):
+        """PA-005: Candidate with krio_support='documented' must have evidence_url."""
+        for candidate in get_all_candidates():
+            if candidate.krio_support == "documented":
+                assert candidate.evidence_url, (
+                    f"Candidate '{candidate.name}' has krio_support='documented' but lacks evidence_url"
+                )
+
+        with pytest.raises(ValidationError, match="missing evidence_url"):
+            CandidateModel(
+                name="Test Model",
+                hf_repo="test/model",
+                parameters="1B",
+                licence="MIT",
+                african_language_support="test",
+                krio_support="documented",
+                min_vram_gb=4,
+                source_url="https://example.org",
+                evidence_url=None,
+            )
+
+    def test_verified_model_requires_verified_on(self):
+        """PA-005: verified=True requires verified_on ISO date string."""
+        with pytest.raises(ValidationError, match="missing verified_on date"):
+            CandidateModel(
+                name="Test Model",
+                hf_repo="test/model",
+                parameters="1B",
+                licence="MIT",
+                african_language_support="test",
+                min_vram_gb=4,
+                source_url="https://example.org",
+                verified=True,
+                verified_on=None,
+            )
+
+    def test_nllb_notes_krio_not_in_official_card(self):
+        """PA-005: NLLB entry must state that Krio is NOT on the official model card."""
+        nllb = next(
+            (c for c in get_all_candidates() if "nllb" in c.name.lower()),
+            None,
+        )
+        assert nllb is not None
+        assert "not in the nllb-200 language list" in nllb.african_language_support.lower()
+
     def test_aya23_does_not_claim_sub_saharan_african_support(self):
         """
         Aya-23 covers 23 languages – none in sub-Saharan Africa.
@@ -85,8 +139,7 @@ class TestRegistry:
             (c for c in get_all_candidates() if "aya" in c.name.lower() and "23" in c.name),
             None,
         )
-        if aya is None:
-            pytest.skip("Aya-23 not in registry – skip")
+        assert aya is not None, "Aya-23 must be registered"
         # Must explicitly note lack of sub-Saharan African support / lack of Krio
         support_lower = (aya.african_language_support or "").lower()
         assert "no sub-saharan" in support_lower or "none" in support_lower, (
