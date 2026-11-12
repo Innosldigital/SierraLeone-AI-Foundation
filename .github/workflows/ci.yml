@@ -44,7 +44,7 @@ jobs:
       - name: Check no Krio text in tests (PA-015)
         shell: bash
         run: |
-          if git grep -wnF -f tests/krio_strings_denylist.txt -- tests/ ':!tests/krio_strings_denylist.txt'; then
+          if grep -rwnF -f .github/krio_strings_denylist.txt tests/; then
             echo "ERROR: Potential unreviewed Krio text found in test files."
             echo "Replace with neutral fixture strings like TEST_FIXTURE_TEXT_001."
             exit 1

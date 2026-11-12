@@ -166,7 +166,7 @@
 | `PA-012` | Medium | Audio format verification (magic bytes for WAV, MP4, AMR, AAC) & edge limits | SLAI-012 | `src/sierraleone_ai/api/app.py` |
 | `PA-013` | Medium | `/translate` validation (one side English), ModelState-based `/health/ready` | SLAI-012 | `src/sierraleone_ai/api/app.py`, `src/sierraleone_ai/serving/state.py` |
 | `PA-014` | Medium | Anchored `.env` path, absolute directory overrides, `slai serve` | SLAI-010 | `src/sierraleone_ai/config.py`, `.env.example`, `src/sierraleone_ai/cli.py` |
-| `PA-015` | Medium | Multi-OS CI matrix (Ubuntu + Windows), denylist scan, uv setup | SLAI-015, SLAI-021 | `.github/workflows/ci.yml`, `tests/krio_strings_denylist.txt` |
+| `PA-015` | Medium | Multi-OS CI matrix (Ubuntu + Windows), denylist scan, uv setup | SLAI-015, SLAI-021 | `.github/workflows/ci.yml`, `.github/krio_strings_denylist.txt` |
 | `PA-016` | Medium | Truthful `slai validate-file` and dynamic `slai status` | SLAI-020 | `src/sierraleone_ai/cli.py` |
 | `PA-017` | Medium | Documentation updates across all guidebooks | SLAI-005, SLAI-018 | `documentation/DATASET_FORMAT.md`, `CLAUDE.md`, `README.md`, etc. |
 | `PA-018` | Medium | Sacrebleu reporting path with official signature string; two-row DP Levenshtein | SLAI-008 | `src/sierraleone_ai/evaluation/reporting.py`, `src/sierraleone_ai/evaluation/metrics.py` |
