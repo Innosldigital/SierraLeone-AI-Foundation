@@ -46,9 +46,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Morie55/SierraLeone-AI-Foundation"
-Issues = "https://github.com/Morie55/SierraLeone-AI-Foundation/issues"
-Documentation = "https://github.com/Morie55/SierraLeone-AI-Foundation/tree/main/documentation"
+Homepage = "https://github.com/Innosldigital/SierraLeone-AI-Foundation"
+Issues = "https://github.com/Innosldigital/SierraLeone-AI-Foundation/issues"
+Documentation = "https://github.com/Innosldigital/SierraLeone-AI-Foundation/tree/main/documentation"
 
 [project.optional-dependencies]
 data = [
