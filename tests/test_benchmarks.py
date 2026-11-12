@@ -30,7 +30,7 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
 
 def _benchmark_item_dict(
     item_id: str = "item-001",
-    prompt: str = "Wetin mek yu de kam?",
+    prompt: str = "TEST_FIXTURE_BENCHMARK_PROMPT_001",
     references: list[str] | None = None,
     review_count: int = 2,
     source: str = "test_fixture_approved_source",
@@ -69,7 +69,7 @@ def _benchmark_item_dict(
         "item_id": item_id,
         "evaluation_category": "qa",
         "prompt": prompt,
-        "references": references or ["Mi na fɔ kam luk yu."],
+        "references": references or ["TEST_FIXTURE_BENCHMARK_REF_001"],
         "review_count": review_count,
         "benchmark_version": "0.1.0",
     }
@@ -256,7 +256,7 @@ class TestAssertHeldOutIntegrity:
         monkeypatch.setattr(cfg_module.settings, "data_dir", data_dir)
         monkeypatch.setattr(cfg_module.settings, "benchmarks_dir", benchmarks_dir)
 
-        prompt_text = "kusheh, wetin mek yu kam na ya?"
+        prompt_text = "test_fixture_overlap_prompt_text_001"
         _write_jsonl(
             benchmarks_dir / "krio" / "eval_real.jsonl",
             [_benchmark_item_dict(prompt=prompt_text)],
@@ -294,7 +294,7 @@ class TestAssertHeldOutIntegrity:
                     },
                 ],
             },
-            "text": "KUSHEH WETIN MEK YU KAM NA YA",
+            "text": "TEST_FIXTURE_OVERLAP_PROMPT_TEXT_001",
             "script": "Latin",
         }
         cleaned_dir = data_dir / "krio" / "cleaned"
