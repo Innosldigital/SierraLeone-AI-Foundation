@@ -6,6 +6,7 @@ Verifies that:
 - The token value does not appear in repr(settings) or str(settings).
 - Paths resolve to absolute locations.
 """
+
 from __future__ import annotations
 
 
@@ -15,6 +16,7 @@ class TestConfigSecrets:
         monkeypatch.setenv("HF_TOKEN", "test-token-abc123")
         # Instantiate a fresh Settings object to pick up the patched env
         from sierraleone_ai.config import Settings
+
         settings = Settings()
         assert settings.hf_token is not None
         assert settings.hf_token.get_secret_value() == "test-token-abc123"
@@ -23,6 +25,7 @@ class TestConfigSecrets:
         """SLAI_HF_TOKEN env var must also be accepted."""
         monkeypatch.setenv("SLAI_HF_TOKEN", "another-secret-token")
         from sierraleone_ai.config import Settings
+
         settings = Settings()
         assert settings.hf_token.get_secret_value() == "another-secret-token"
 
@@ -30,23 +33,27 @@ class TestConfigSecrets:
         """The raw token value must not leak into repr() or str()."""
         monkeypatch.setenv("SLAI_HF_TOKEN", "super-secret-token-xyz")
         from sierraleone_ai.config import Settings
+
         settings = Settings()
         assert "super-secret-token-xyz" not in repr(settings)
         assert "super-secret-token-xyz" not in str(settings)
 
     def test_data_dir_is_absolute(self):
         from sierraleone_ai.config import settings
+
         assert settings.data_dir.is_absolute(), (
             f"settings.data_dir must be absolute, got {settings.data_dir}"
         )
 
     def test_krio_data_dir_under_data_dir(self):
         from sierraleone_ai.config import settings
+
         assert settings.krio_data_dir.is_absolute()
         assert "krio" in str(settings.krio_data_dir)
 
     def test_allow_training_defaults_false(self):
         from sierraleone_ai.config import settings
+
         assert settings.allow_training is False
 
     def test_pyproject_optional_dependencies_uncommented(self):
@@ -112,14 +119,18 @@ class TestConfigSecrets:
         """PA-014: Overridden relative data_dir resolves against project_root."""
         monkeypatch.setenv("SLAI_DATA_DIR", "my_custom_datasets")
         from sierraleone_ai.config import Settings
+
         s = Settings()
         assert s.data_dir.is_absolute()
         assert str(s.data_dir).endswith("my_custom_datasets")
 
     def test_cors_origins_parsed_from_json(self, monkeypatch):
         """PA-014: SLAI_CORS_ORIGINS parses JSON list."""
-        monkeypatch.setenv("SLAI_CORS_ORIGINS", '["https://example.com", "https://app.example.com"]')
+        monkeypatch.setenv(
+            "SLAI_CORS_ORIGINS", '["https://example.com", "https://app.example.com"]'
+        )
         from sierraleone_ai.config import Settings
+
         s = Settings()
         assert s.cors_origins == ["https://example.com", "https://app.example.com"]
 
@@ -127,7 +138,6 @@ class TestConfigSecrets:
         """PA-014: SLAI_CORS_ORIGINS empty string yields empty list."""
         monkeypatch.setenv("SLAI_CORS_ORIGINS", "")
         from sierraleone_ai.config import Settings
+
         s = Settings()
         assert s.cors_origins == []
-
-

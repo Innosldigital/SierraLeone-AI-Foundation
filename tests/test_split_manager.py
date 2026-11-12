@@ -1,6 +1,7 @@
 """
 Tests for split_manager deterministic_split and speaker_aware_split (SLAI-009 / SLAI-017).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -134,9 +135,7 @@ class TestSpeakerAwareSplit:
 
         # Map each original speaker to its v1 split
         v1_assignment = {
-            r["speaker_id"]: split_name
-            for split_name, recs in splits_v1.items()
-            for r in recs
+            r["speaker_id"]: split_name for split_name, recs in splits_v1.items() for r in recs
         }
 
         # Add a new speaker spk_99
@@ -151,9 +150,7 @@ class TestSpeakerAwareSplit:
             persist_manifest=True,
         )
         v2_assignment = {
-            r["speaker_id"]: split_name
-            for split_name, recs in splits_v2.items()
-            for r in recs
+            r["speaker_id"]: split_name for split_name, recs in splits_v2.items() for r in recs
         }
 
         for spk, original_split in v1_assignment.items():
@@ -181,9 +178,5 @@ class TestSpeakerAwareSplit:
             {"speaker_id": "spk_held_out", "id": 888}
         ]
         splits = speaker_aware_split(records, seed=42, manifest_path=manifest_path)
-        assigned_speakers = {
-            r["speaker_id"] for recs in splits.values() for r in recs
-        }
+        assigned_speakers = {r["speaker_id"] for recs in splits.values() for r in recs}
         assert "spk_held_out" not in assigned_speakers
-
-

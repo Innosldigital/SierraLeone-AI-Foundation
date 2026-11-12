@@ -9,9 +9,11 @@ Ensures that:
   one split, held-out speakers are permanently excluded from train/tuning splits,
   and speaker-to-split manifests can be persisted and reused when new data arrives.
 """
+
 from __future__ import annotations
 
 import json
+import os
 import random
 from collections import defaultdict
 from pathlib import Path
@@ -63,9 +65,7 @@ def deterministic_split(
     n = len(items)
 
     if 0 < n < num_active:
-        raise ValueError(
-            f"need at least {num_active} speakers/items for these ratios (got {n})"
-        )
+        raise ValueError(f"need at least {num_active} speakers/items for these ratios (got {n})")
 
     if n == 0:
         return {name: [] for name in names}
@@ -177,8 +177,7 @@ def speaker_aware_split(
     # 3. Separate existing/held-out speakers from new speakers
     all_speakers = sorted(by_speaker.keys())
     new_speakers = [
-        s for s in all_speakers
-        if s not in existing_map and s not in persisted_held_out
+        s for s in all_speakers if s not in existing_map and s not in persisted_held_out
     ]
 
     speaker_to_split: dict[str, str] = dict(existing_map)
@@ -186,9 +185,7 @@ def speaker_aware_split(
         speaker_to_split[spk] = "held_out"
 
     if new_speakers:
-        active_existing = {
-            spk: sp for spk, sp in existing_map.items() if sp in ratios
-        }
+        active_existing = {spk: sp for spk, sp in existing_map.items() if sp in ratios}
         num_active_splits = sum(1 for r in ratios.values() if r > 0)
         if not active_existing or len(new_speakers) >= num_active_splits:
             # Shuffle once inside deterministic_split (no redundant double-shuffle: SLAI-009)
@@ -203,8 +200,7 @@ def speaker_aware_split(
             shuffled_new = list(new_speakers)
             rng.shuffle(shuffled_new)
             counts = {
-                name: sum(1 for sp in speaker_to_split.values() if sp == name)
-                for name in ratios
+                name: sum(1 for sp in speaker_to_split.values() if sp == name) for name in ratios
             }
             for spk in shuffled_new:
                 total_after = sum(counts.values()) + 1
@@ -233,14 +229,16 @@ def speaker_aware_split(
     split_names = list(seen_speakers_per_split.keys())
     for i in range(len(split_names)):
         for j in range(i + 1, len(split_names)):
-            overlap = seen_speakers_per_split[split_names[i]] & seen_speakers_per_split[split_names[j]]
+            overlap = (
+                seen_speakers_per_split[split_names[i]] & seen_speakers_per_split[split_names[j]]
+            )
             if overlap:
                 raise RuntimeError(
                     f"Speaker leakage detected between '{split_names[i]}' and "
                     f"'{split_names[j]}': {sorted(overlap)}"
                 )
 
-    # 6. Persist manifest if requested
+    # 6. Persist manifest atomically if requested (PA-022)
     if target_manifest is not None:
         target_manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest_payload = {
@@ -251,9 +249,20 @@ def speaker_aware_split(
             "speaker_to_split": speaker_to_split,
             "held_out_speakers": sorted(persisted_held_out),
         }
-        target_manifest.write_text(
+        tmp = target_manifest.with_suffix(".tmp")
+        tmp.write_text(
             json.dumps(manifest_payload, indent=2, sort_keys=True),
             encoding="utf-8",
+        )
+        os.replace(tmp, target_manifest)
+
+    # 7. Log final counts and ratios (PA-022)
+    total_recs = len(records)
+    for name, split_recs in result.items():
+        ratio_pct = (len(split_recs) / total_recs * 100) if total_recs else 0.0
+        logger.info(
+            f"Speaker-aware split '{name}': {len(split_recs)} records ({ratio_pct:.1f}%), "
+            f"{len(seen_speakers_per_split.get(name, set()))} speakers"
         )
 
     return result

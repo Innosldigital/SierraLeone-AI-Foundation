@@ -14,6 +14,7 @@ NOTE: The cross-creole overlap marker list below is a heuristic diagnostic aid
 set `needs_native_review=True` and `possible_cross_creole_overlap`, while
 never setting `rejected=True` and always preserving `original` text.
 """
+
 from __future__ import annotations
 
 import re
@@ -51,7 +52,7 @@ HARD_CREOLE_MARKERS: dict[str, str] = {
 
 SOFT_CREOLE_MARKERS: dict[str, str] = {
     "abi": "Possible cross-creole tag particle (needs native review)",
-    "comot": "Possible non-standard orthography variant for 'kɔmɔt' (needs native review)",
+    "comot": "Spelling-variant note: non-standard orthography for 'kɔmɔt' (needs native review)",
     "my guy": "Possible colloquialism overlap (needs native review)",
 }
 
@@ -70,7 +71,7 @@ CREOLE_MARKER_METADATA: dict[str, dict[str, Any]] = {
 _STRIP_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufeff]")
 
 # Collapse multiple whitespace into single space
-_WHITESPACE_PATTERN = re.compile(r"[ \t]+")
+_WHITESPACE_PATTERN = re.compile(r"[ \t\r\f\v]+")
 
 
 def detect_non_krio_creole_markers(
@@ -127,13 +128,13 @@ def orthography_profile(text: str) -> dict[str, int | float]:
 class NormalisationConfig:
     """Configuration for the Krio text normaliser."""
 
-    fix_unicode: bool = True          # run ftfy unicode repair with explanation tracking
-    lowercase: bool = False           # do NOT lowercase by default – Krio uses case
+    fix_unicode: bool = True  # run ftfy unicode repair with explanation tracking
+    lowercase: bool = False  # do NOT lowercase by default – Krio uses case
     strip_control_chars: bool = True
     normalise_whitespace: bool = True
     apply_spelling_variants: bool = False  # only after native-speaker review
     check_creole_contamination: bool = True
-    max_length: int = 4096            # characters
+    max_length: int = 4096  # characters
     on_overlong: Literal["truncate", "reject"] = "reject"  # SLAI-016: default to flag-and-reject
 
 
@@ -173,15 +174,12 @@ class KrioNormalizer:
         result = NormalisationResult(original=text, normalised=text)
         cfg = self.config
 
-        # Check overlong rejection early if configured
-        if cfg.max_length and len(text) > cfg.max_length:
-            if cfg.on_overlong == "reject":
-                result.rejected = True
-                result.rejection_reason = (
-                    f"Text length {len(text)} exceeds max_length {cfg.max_length}"
-                )
-                result.changes.append("rejected_overlong")
-                return result
+        # 0. Normalise line endings (\r\n -> \n, stray \r -> \n)
+        if "\r" in text:
+            text_crlf = text.replace("\r\n", "\n").replace("\r", "\n")
+            if text_crlf != text:
+                result.changes.append("line_endings_normalised")
+            text = text_crlf
 
         # 1. Unicode repair (ftfy.fix_and_explain records exact transformations: SLAI-016)
         if cfg.fix_unicode:
@@ -214,18 +212,26 @@ class KrioNormalizer:
                 result.changes.append("whitespace_normalised")
             text = normalised_ws
 
-        # 5. Optional lowercasing (disabled by default for Krio)
+        # 5. Overlong check AFTER whitespace normalisation (PA-019)
+        if cfg.max_length and len(text) > cfg.max_length:
+            if cfg.on_overlong == "reject":
+                result.rejected = True
+                result.rejection_reason = (
+                    f"Text length {len(text)} exceeds max_length {cfg.max_length}"
+                )
+                result.changes.append("rejected_overlong")
+                return result
+
+        # 6. Optional lowercasing (disabled by default for Krio)
         if cfg.lowercase:
             lowered = text.lower()
             if lowered != text:
                 result.changes.append("lowercased")
             text = lowered
 
-        # 6. Optional spelling variant normalisation (SLAI-016 guard)
+        # 7. Optional spelling variant normalisation (SLAI-016 guard)
         if cfg.apply_spelling_variants:
-            active_variants = {
-                k: v for k, v in KRIO_SPELLING_VARIANTS.items() if k != v
-            }
+            active_variants = {k: v for k, v in KRIO_SPELLING_VARIANTS.items() if k != v}
             if not SPELLING_VARIANTS_REVIEWED_BY_NATIVE or not active_variants:
                 raise ValueError(
                     "apply_spelling_variants=True is disabled because KRIO_SPELLING_VARIANTS "
@@ -239,13 +245,13 @@ class KrioNormalizer:
                     result.changes.append(f"variant_normalised:{variant}→{standard}")
                 text = new_text
 
-        # 7. Length check and truncation if on_overlong == "truncate"
+        # 8. Length check and truncation if on_overlong == "truncate"
         if cfg.max_length and len(text) > cfg.max_length:
             text = text[: cfg.max_length]
             result.truncated = True
             result.changes.append(f"truncated_at_{cfg.max_length}")
 
-        # 8. Heuristic cross-creole overlap check (SLAI-030: never auto-rejects!)
+        # 9. Heuristic cross-creole overlap check (SLAI-030: never auto-rejects!)
         if cfg.check_creole_contamination:
             markers = detect_non_krio_creole_markers(text)
             if markers:

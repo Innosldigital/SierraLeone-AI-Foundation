@@ -1,4 +1,5 @@
 """Tests for source archive generation and data deny-by-default allow-list (PA-006)."""
+
 from pathlib import Path, PurePosixPath
 
 from scripts.make_source_archive import _data_allowed, build_clean_archive, should_include_path
@@ -39,17 +40,25 @@ def test_build_clean_archive_filters_disallowed_files(tmp_path: Path):
     (root / "src" / "code.py").write_text("print('hello')", encoding="utf-8")
     (root / "datasets" / "krio" / "cleaned").mkdir(parents=True)
     (root / "datasets" / "krio" / "cleaned" / ".gitkeep").touch()
-    (root / "datasets" / "krio" / "cleaned" / "example_krio_text_train.jsonl").write_text("{}", encoding="utf-8")
+    (root / "datasets" / "krio" / "cleaned" / "example_krio_text_train.jsonl").write_text(
+        "{}", encoding="utf-8"
+    )
     (root / "datasets" / "source_register.csv").write_text("source_name,decision", encoding="utf-8")
     (root / "datasets" / "manifests").mkdir(parents=True)
-    (root / "datasets" / "manifests" / "krio-train-v1.manifest.json").write_text("{}", encoding="utf-8")
+    (root / "datasets" / "manifests" / "krio-train-v1.manifest.json").write_text(
+        "{}", encoding="utf-8"
+    )
     (root / "benchmarks" / "krio").mkdir(parents=True)
     (root / "benchmarks" / "krio" / ".gitkeep").touch()
     (root / "benchmarks" / "krio" / "held_out_eval_schema.jsonl").write_text("{}", encoding="utf-8")
 
     # Disallowed files
-    (root / "datasets" / "krio" / "cleaned" / "krio_text_train.jsonl").write_text("secret real data", encoding="utf-8")
-    (root / "benchmarks" / "krio" / "real_eval.jsonl").write_text("secret real benchmark", encoding="utf-8")
+    (root / "datasets" / "krio" / "cleaned" / "krio_text_train.jsonl").write_text(
+        "secret real data", encoding="utf-8"
+    )
+    (root / "benchmarks" / "krio" / "real_eval.jsonl").write_text(
+        "secret real benchmark", encoding="utf-8"
+    )
     (root / ".env").write_text("SECRET=123", encoding="utf-8")
     (root / ".venv").mkdir()
     (root / ".venv" / "pyvenv.cfg").write_text("home = ...", encoding="utf-8")

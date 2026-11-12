@@ -1,4 +1,5 @@
 """Tests for the Krio text normaliser and cross-creole contamination check."""
+
 import pytest
 
 from sierraleone_ai.preprocessing.krio_normalizer import (
@@ -71,9 +72,7 @@ class TestKrioNormalizer:
 
     def test_clean_neutral_text_not_flagged(self):
         # Neutral English text that contains no Nigerian Pidgin / Ghanaian / Liberian markers
-        markers = detect_non_krio_creole_markers(
-            "Please go to the market quickly and return."
-        )
+        markers = detect_non_krio_creole_markers("Please go to the market quickly and return.")
         assert markers == []
 
     def test_orthography_profile(self):
@@ -83,3 +82,19 @@ class TestKrioNormalizer:
         assert profile["open_o_count"] == 1
         assert profile["total_open_vowels"] == 2
         assert profile["standard_orthography_ratio"] > 0.0
+
+    def test_crlf_and_cr_normalised(self):
+        result = self.normalizer.normalise("LINE_ONE\r\nLINE_TWO\rLINE_THREE")
+        assert "line_endings_normalised" in result.changes
+        assert "\r" not in result.normalised
+
+    def test_overlong_checked_after_whitespace_normalisation(self):
+        # 10 chars + 5 spaces = 15 chars before whitespace normalisation, 10 chars after
+        cfg = NormalisationConfig(max_length=10, on_overlong="reject")
+        normalizer = KrioNormalizer(config=cfg)
+        result = normalizer.normalise("A" * 10 + "     ")
+        assert result.rejected is False
+        assert len(result.normalised) == 10
+
+    def test_comot_spelling_variant_note(self):
+        assert "Spelling-variant" in CREOLE_MARKER_METADATA["comot"]["note"]

@@ -6,6 +6,7 @@ Provides:
 - TTS model configuration stubs
 - Guarded TTS training entry point
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ class TTSTrainingConfig:
 def check_tts_recording_quality(
     record: VerifiedSpeechTranscriptionRecord,
     config: TTSTrainingConfig | None = None,
+    dataset_root: Path | None = None,
 ) -> tuple[bool, list[str]]:
     """
     Validate whether a verified speech recording meets studio TTS quality standards.
@@ -60,13 +62,22 @@ def check_tts_recording_quality(
 
     if record.recording_environment is None:
         issues.append("recording environment not recorded – required for TTS quality gate")
-    elif record.recording_environment != cfg.required_environment:
+    elif (
+        record.recording_environment.strip().casefold()
+        != cfg.required_environment.strip().casefold()
+    ):
         issues.append(
             f"Recording environment '{record.recording_environment}' != '{cfg.required_environment}'"
         )
 
     if record.duration_seconds is None:
         issues.append("duration not measured – required for TTS quality gate")
+
+    if dataset_root is not None:
+        try:
+            record.verify_audio_file(dataset_root)
+        except (FileNotFoundError, ValueError) as exc:
+            issues.append(f"Audio file verification failed: {exc}")
 
     return (len(issues) == 0, issues)
 
@@ -93,4 +104,3 @@ def start_tts_training(
         f"TTS training for {cfg.language} ({cfg.base_architecture}) requires studio-grade "
         "verified recordings and explicit speaker consent."
     )
-

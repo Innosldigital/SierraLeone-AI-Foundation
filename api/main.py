@@ -6,7 +6,7 @@ Run with:
 or:
     uvicorn sierraleone_ai.api.app:app --reload
 """
+
 from sierraleone_ai.api.app import app
 
 __all__ = ["app"]
-

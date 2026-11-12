@@ -10,6 +10,7 @@ For official reporting on morphologically variable low-resource languages (such 
 `chrf_score` (chrF/chrF++) is the primary automatic metric, and `sacrebleu` (BLEU + chrF++)
 with its reproducibility signature should be used whenever available.
 """
+
 from __future__ import annotations
 
 import math
@@ -22,18 +23,22 @@ def _ngrams(tokens: list[str], n: int) -> Counter[tuple[str, ...]]:
 
 
 def _edit_distance(a: list[str], b: list[str]) -> int:
-    """Levenshtein distance between two sequences."""
+    """Levenshtein distance between two sequences using two-row DP (O(min(n,m)) space) (PA-018)."""
+    if len(a) < len(b):
+        a, b = b, a
     n, m = len(a), len(b)
-    d = [[0] * (m + 1) for _ in range(n + 1)]
-    for i in range(n + 1):
-        d[i][0] = i
-    for j in range(m + 1):
-        d[0][j] = j
+    prev = list(range(m + 1))
+    curr = [0] * (m + 1)
+
     for i in range(1, n + 1):
+        curr[0] = i
+        a_elem = a[i - 1]
         for j in range(1, m + 1):
-            cost = 0 if a[i - 1] == b[j - 1] else 1
-            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
-    return d[n][m]
+            cost = 0 if a_elem == b[j - 1] else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev, curr = curr, prev
+
+    return prev[m]
 
 
 def bleu_score(
@@ -112,8 +117,7 @@ def chrf_score(
         if not reference:
             raise ValueError("references must not be empty")
         return max(
-            chrf_score(ref, hypothesis, max_char_n=max_char_n, beta=beta)
-            for ref in reference
+            chrf_score(ref, hypothesis, max_char_n=max_char_n, beta=beta) for ref in reference
         )
 
     ref_norm = unicodedata.normalize("NFC", reference).strip()

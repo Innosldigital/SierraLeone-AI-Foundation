@@ -36,6 +36,7 @@ STRICT MODE (SLAI-022)
 * `strict=False` (PREVIEW mode – not for training): returns valid rows alongside
   `report.issues`.
 """
+
 from __future__ import annotations
 
 import csv
@@ -76,6 +77,7 @@ _PHONE_PII_RE = re.compile(r"(?:\+?232[\s-]?[0-9]{2}[\s-]?[0-9]{6}|\b0[0-9]{2}[\
 # ---------------------------------------------------------------------------
 # Load report & strict validation error (SLAI-022)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class LoadIssue:
@@ -124,17 +126,6 @@ class LoadReport(Generic[T]):
     def __bool__(self) -> bool:
         return bool(self.records)
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, list):
-            return self.records == other
-        if isinstance(other, LoadReport):
-            return (
-                self.records == other.records
-                and self.issues == other.issues
-                and self.skipped == other.skipped
-            )
-        return NotImplemented
-
 
 class DataValidationError(ValueError):
     """Raised in strict mode when a dataset file contains malformed JSON or invalid records."""
@@ -147,6 +138,7 @@ class DataValidationError(ValueError):
 # ---------------------------------------------------------------------------
 # Source rights register (SLAI-031)
 # ---------------------------------------------------------------------------
+
 
 def load_source_register(register_path: Path | None = None) -> dict[str, dict[str, str]]:
     """
@@ -170,6 +162,7 @@ def load_source_register(register_path: Path | None = None) -> dict[str, dict[st
 # ---------------------------------------------------------------------------
 # Eligibility gate
 # ---------------------------------------------------------------------------
+
 
 def _is_eligible(
     record_or_dict: dict[str, Any] | Any,
@@ -223,6 +216,7 @@ def _is_eligible(
 # ---------------------------------------------------------------------------
 # JSONL reader & quarantine writer (SLAI-022)
 # ---------------------------------------------------------------------------
+
 
 def _write_quarantine_issues(
     source_path: Path,
@@ -369,8 +363,7 @@ def _apply_policy(
     n_skip = sum(skipped.values())
     if n_skip:
         logger.info(
-            f"{file_name}: {len(admitted)}/{total} records admitted; "
-            f"skipped: {dict(skipped)}"
+            f"{file_name}: {len(admitted)}/{total} records admitted; skipped: {dict(skipped)}"
         )
     return admitted, skipped
 
@@ -378,6 +371,7 @@ def _apply_policy(
 # ---------------------------------------------------------------------------
 # PII scanner & release export filter (SLAI-025)
 # ---------------------------------------------------------------------------
+
 
 def scan_jsonl_for_pii(path: Path) -> list[LoadIssue]:
     """
@@ -453,6 +447,7 @@ def export_for_release(records: Iterable[T]) -> list[T]:
 # Public loaders (SLAI-001 / SLAI-007 / SLAI-022 / PA-002 / PA-009)
 # ---------------------------------------------------------------------------
 
+
 def load_jsonl_records(
     path: Path,
     model_cls: type[T],
@@ -496,6 +491,7 @@ def load_jsonl_records(
     bench_fps: set[str] = set()
     if policy.exclude_benchmark_overlap:
         from sierraleone_ai.evaluation.benchmarks import benchmark_fingerprints
+
         bench_fps = benchmark_fingerprints(language)
 
     records: list[T] = []
@@ -570,6 +566,7 @@ def load_jsonl_records(
         # 4. Held-out benchmark overlap check on all text fields (PA-004)
         if bench_fps:
             from sierraleone_ai.evaluation.benchmarks import iter_texts, text_fingerprint
+
             if any(text_fingerprint(t) in bench_fps for t in iter_texts(parsed_obj)):
                 skipped["benchmark_overlap"] += 1
                 continue
@@ -742,6 +739,7 @@ def load_conversations(
 # ---------------------------------------------------------------------------
 # Training readiness is NOT computed here; it comes from the hash-verified dataset
 # manifest (see datasets/manifest.py and training/guard.py::check_dataset_readiness).
+
 
 def _count_schema_valid_records(path: Path) -> int:
     """

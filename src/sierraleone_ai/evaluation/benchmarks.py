@@ -15,6 +15,7 @@ MUST NEVER be used for training. This module provides:
     and >= min_benchmark_items (default 300).
 5.  `assert_held_out_integrity(language)` — bool wrapper over check_held_out_integrity.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -79,6 +80,7 @@ def _rel_benchmark_path(path: Path) -> str:
 # ---------------------------------------------------------------------------
 # Benchmark Manifest Model (PA-004)
 # ---------------------------------------------------------------------------
+
 
 class BenchmarkManifest(BaseModel):
     schema_version: Literal[2] = 2
@@ -194,7 +196,9 @@ def build_benchmark_manifest(language: str = "krio", out_dir: Path | None = None
 
     out_path = target_dir / f"{manifest.manifest_id}.manifest.json"
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(manifest.model_dump(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(
+        json.dumps(manifest.model_dump(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     os.replace(tmp, out_path)
     return out_path
 
@@ -202,6 +206,7 @@ def build_benchmark_manifest(language: str = "krio", out_dir: Path | None = None
 # ---------------------------------------------------------------------------
 # Text normalisation and fingerprinting
 # ---------------------------------------------------------------------------
+
 
 def _normalise_for_fingerprint(text: str) -> str:
     """
@@ -416,9 +421,7 @@ def assert_held_out_integrity(language: str = "krio") -> bool:
     """
     result = check_held_out_integrity(language)
     if not result["ok"]:
-        logger.warning(
-            f"[BENCHMARK] Held-out integrity failed for {language}: {result['reasons']}"
-        )
+        logger.warning(f"[BENCHMARK] Held-out integrity failed for {language}: {result['reasons']}")
         return False
     logger.info(f"[BENCHMARK] {language}: {result['count']} items verified.")
     return True

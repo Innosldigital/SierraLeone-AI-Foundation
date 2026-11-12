@@ -5,6 +5,7 @@ Verifies that:
 - With only template files present, all readiness items are NOT ready.
 - require_training_approval raises even when allow_training=True if datasets are empty.
 """
+
 from __future__ import annotations
 
 import json
@@ -93,6 +94,7 @@ class TestCheckDatasetReadiness:
     def test_empty_data_dir_all_not_ready(self, tmp_path: Path, monkeypatch):
         """With no dataset files at all, every readiness item must be NOT ready."""
         import sierraleone_ai.config as cfg_module
+
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
 
         items = check_dataset_readiness()
@@ -101,13 +103,13 @@ class TestCheckDatasetReadiness:
         assert all(isinstance(item, ReadinessItem) for item in items.values())
         not_ready = [item for item in items.values() if item.ok]
         assert not not_ready, (
-            f"Expected all items NOT ready, but these passed: "
-            f"{[i.key for i in not_ready]}"
+            f"Expected all items NOT ready, but these passed: {[i.key for i in not_ready]}"
         )
 
     def test_template_only_all_not_ready(self, tmp_path: Path, monkeypatch):
         """Template-only JSONL files must NOT satisfy readiness thresholds."""
         import sierraleone_ai.config as cfg_module
+
         krio_dir = tmp_path / "krio"
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
 
@@ -122,23 +124,25 @@ class TestCheckDatasetReadiness:
         items = check_dataset_readiness()
         ready = [item for item in items.values() if item.ok]
         assert not ready, (
-            f"Template records must not count. Ready items: "
-            f"{[(i.key, i.have) for i in ready]}"
+            f"Template records must not count. Ready items: {[(i.key, i.have) for i in ready]}"
         )
 
-    def test_readiness_item_has_name_alias(self, tmp_path: Path, monkeypatch):
-        """ReadinessItem.name and .ready must be aliases for .key and .ok."""
+    def test_readiness_item_properties(self, tmp_path: Path, monkeypatch):
+        """ReadinessItem must have canonical key, ok, have, need properties (PA-021)."""
         import sierraleone_ai.config as cfg_module
+
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
         items = check_dataset_readiness()
         for item in items.values():
-            assert item.name == item.key
-            assert item.ready == item.ok
-            assert item.count == item.have
+            assert isinstance(item.key, str)
+            assert isinstance(item.have, int)
+            assert isinstance(item.need, int)
+            assert item.ok == (item.have >= item.need)
 
     def test_ineligible_records_count_zero(self, tmp_path: Path, monkeypatch):
         """PA-001: 3 unvalidated/no-consent/unknown-licence/wrong-split + 1 machine_generated -> count 0."""
         import sierraleone_ai.config as cfg_module
+
         krio_dir = tmp_path / "krio"
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
 
@@ -195,6 +199,7 @@ class TestCheckDatasetReadiness:
     def test_quarantine_issue_file_counts_zero(self, tmp_path: Path, monkeypatch):
         """PA-007: *.issues.jsonl quarantine reports are not counted as data."""
         import sierraleone_ai.config as cfg_module
+
         krio_dir = tmp_path / "krio"
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
 
@@ -209,11 +214,10 @@ class TestCheckDatasetReadiness:
         assert scan.eligible_counts["text_training"] == 0
         assert len(scan.files) == 0
 
-    def test_same_record_id_in_cleaned_and_validated_counts_once(
-        self, tmp_path: Path, monkeypatch
-    ):
+    def test_same_record_id_in_cleaned_and_validated_counts_once(self, tmp_path: Path, monkeypatch):
         """PA-001: Same record_id present in both cleaned/ and validated/ must not double count."""
         import sierraleone_ai.config as cfg_module
+
         krio_dir = tmp_path / "krio"
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
 
@@ -228,11 +232,10 @@ class TestCheckDatasetReadiness:
         items = check_dataset_readiness("krio", "train", manifest_path=manifest_path)
         assert items["cleaned_text"].have == 1
 
-    def test_manifest_hash_mismatch_invalidates_readiness(
-        self, tmp_path: Path, monkeypatch
-    ):
+    def test_manifest_hash_mismatch_invalidates_readiness(self, tmp_path: Path, monkeypatch):
         """PA-001: Tampering with a data file after manifest build invalidates readiness counts."""
         import sierraleone_ai.config as cfg_module
+
         krio_dir = tmp_path / "krio"
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
 
@@ -250,15 +253,16 @@ class TestCheckDatasetReadiness:
         assert stale_items["cleaned_text"].have == 0
         assert "stale" in stale_items["cleaned_text"].detail
 
-    def test_readiness_turns_green_when_threshold_met(
-        self, tmp_path: Path, monkeypatch
-    ):
+    def test_readiness_turns_green_when_threshold_met(self, tmp_path: Path, monkeypatch):
         """PA-001: Readiness item turns ok=True when threshold is satisfied by manifest."""
         import sierraleone_ai.config as cfg_module
         import sierraleone_ai.training.guard as guard_mod
+
         krio_dir = tmp_path / "krio"
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
-        monkeypatch.setattr(guard_mod, "_MIN_RECORDS", {**guard_mod._MIN_RECORDS, "cleaned_text": 2})
+        monkeypatch.setattr(
+            guard_mod, "_MIN_RECORDS", {**guard_mod._MIN_RECORDS, "cleaned_text": 2}
+        )
 
         rows = [
             _valid_record(record_id="11111111-1111-4111-8111-111111111111"),
@@ -278,14 +282,13 @@ class TestRequireTrainingApproval:
         with pytest.raises(RuntimeError, match="TRAINING GUARD"):
             require_training_approval("test task")
 
-    def test_raises_even_with_allow_training_set_if_no_data(
-        self, tmp_path: Path, monkeypatch
-    ):
+    def test_raises_even_with_allow_training_set_if_no_data(self, tmp_path: Path, monkeypatch):
         """
         Even with SLAI_ALLOW_TRAINING=true, the guard must still raise
         when dataset readiness thresholds are not met.
         """
         import sierraleone_ai.config as cfg_module
+
         monkeypatch.setattr(cfg_module.settings, "allow_training", True)
         monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
 

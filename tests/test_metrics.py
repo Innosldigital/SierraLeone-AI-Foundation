@@ -1,4 +1,5 @@
 """Tests for evaluation metrics and native-speaker evaluation forms."""
+
 import pytest
 
 from sierraleone_ai.evaluation.metrics import (
@@ -132,3 +133,27 @@ class TestNativeSpeakerEvaluation:
             evaluator_notes="FIXTURE_NOTE: grammar issue detected in output",
         )
         assert form.grammatical_correctness == LikertScore.POOR
+
+
+class TestReporting:
+    def test_compute_sacrebleu(self):
+        """PA-018: Test official sacrebleu reporting and signatures."""
+        from sierraleone_ai.evaluation.reporting import compute_sacrebleu
+
+        try:
+            import sacrebleu  # noqa: F401
+        except ImportError:
+            with pytest.raises(RuntimeError, match="requires `sacrebleu`"):
+                compute_sacrebleu(["test"], [["test"]])
+            return
+
+        hyp = ["this is a test"]
+        ref = [["this is a test"]]
+        res = compute_sacrebleu(hyp, ref)
+        assert "bleu_score" in res
+        assert "bleu_signature" in res
+        assert "chrf_score" in res
+        assert "chrf_signature" in res
+        assert res["bleu_score"] == pytest.approx(100.0, abs=1e-2)
+        assert res["chrf_score"] == pytest.approx(100.0, abs=1e-2)
+        assert "BLEU" in res["bleu_signature"] or "nrefs" in res["bleu_signature"]

@@ -1,6 +1,7 @@
 """
 Tests for benchmark contamination fingerprinting and integrity (SLAI-007 / SLAI-017 / PA-004).
 """
+
 from __future__ import annotations
 
 import json
@@ -195,6 +196,7 @@ class TestBenchmarkItem:
 class TestAssertHeldOutIntegrity:
     def test_no_real_records_returns_false(self, tmp_path: Path, monkeypatch):
         import sierraleone_ai.config as cfg_module
+
         monkeypatch.setattr(cfg_module.settings, "benchmarks_dir", tmp_path / "benchmarks")
 
         result = assert_held_out_integrity(language="krio")
@@ -202,6 +204,7 @@ class TestAssertHeldOutIntegrity:
 
     def test_template_only_returns_false(self, tmp_path: Path, monkeypatch):
         import sierraleone_ai.config as cfg_module
+
         benchmarks_dir = tmp_path / "benchmarks"
         monkeypatch.setattr(cfg_module.settings, "benchmarks_dir", benchmarks_dir)
 
@@ -216,6 +219,7 @@ class TestAssertHeldOutIntegrity:
     def test_manifest_and_integrity_check(self, tmp_path: Path, monkeypatch):
         """PA-004: build_benchmark_manifest and check_held_out_integrity."""
         import sierraleone_ai.config as cfg_module
+
         benchmarks_dir = tmp_path / "benchmarks"
         monkeypatch.setattr(cfg_module.settings, "benchmarks_dir", benchmarks_dir)
         monkeypatch.setattr(cfg_module.settings, "min_benchmark_items", 2)
@@ -299,4 +303,3 @@ class TestAssertHeldOutIntegrity:
         report = load_krio_text(split="train")
         assert len(report.records) == 0
         assert report.skipped.get("benchmark_overlap", 0) == 1
-

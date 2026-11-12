@@ -1,4 +1,5 @@
 """Tests for the FastAPI application endpoints."""
+
 import io
 
 from fastapi.testclient import TestClient
@@ -222,5 +223,3 @@ def test_transcribe_rejects_riff_non_wave():
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "malformed_audio"
-
-

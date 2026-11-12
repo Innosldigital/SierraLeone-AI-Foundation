@@ -16,6 +16,7 @@ IMPORTANT:
     not a hard-coded flag.
   - Headline marketing claims such as "100+ languages" must never be recorded as Krio support.
 """
+
 from __future__ import annotations
 
 import json

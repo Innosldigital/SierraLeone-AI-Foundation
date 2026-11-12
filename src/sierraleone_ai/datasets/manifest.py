@@ -16,6 +16,7 @@ Only the explicit task folders below are scanned, so `quarantine/`, `splits/`,
 `manifests/`, `raw/` and `rejected/` are never counted. `example_*` templates and
 `*.issues.jsonl` quarantine reports are skipped even if placed in a task folder.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -69,7 +70,9 @@ TASK_SOURCES: dict[TrainingTask, tuple[tuple[str, ...], type[BaseModel]]] = {
 }
 
 MANIFEST_SCHEMA_VERSION: Literal[2] = 2
-_MANIFEST_NAME_RE = re.compile(r"^(?P<lang>[a-z_]+)-(?P<split>[a-z_]+)-v(?P<n>\d+)\.manifest\.json$")
+_MANIFEST_NAME_RE = re.compile(
+    r"^(?P<lang>[a-z_]+)-(?P<split>[a-z_]+)-v(?P<n>\d+)\.manifest\.json$"
+)
 
 
 def is_countable_data_file(path: Path) -> bool:
@@ -175,6 +178,7 @@ def scan_eligible_records(language: str = "krio", split: str = "train") -> Eligi
 # Manifest model, build, discovery and verification
 # ---------------------------------------------------------------------------
 
+
 class DatasetManifest(BaseModel):
     schema_version: Literal[2] = MANIFEST_SCHEMA_VERSION
     language: str = Field(..., min_length=1)
@@ -206,7 +210,9 @@ def _existing_versions(language: str, split: str, out_dir: Path) -> list[tuple[i
     return sorted(found)
 
 
-def latest_manifest_path(language: str, split: str = "train", out_dir: Path | None = None) -> Path | None:
+def latest_manifest_path(
+    language: str, split: str = "train", out_dir: Path | None = None
+) -> Path | None:
     versions = _existing_versions(language, split, out_dir or manifests_dir())
     return versions[-1][1] if versions else None
 
@@ -227,7 +233,9 @@ def _git_commit() -> str | None:
     return sha if out.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
-def build_manifest(language: str = "krio", split: str = "train", out_dir: Path | None = None) -> Path:
+def build_manifest(
+    language: str = "krio", split: str = "train", out_dir: Path | None = None
+) -> Path:
     """Scan, then atomically write `<language>-<split>-vN.manifest.json`. Returns the path."""
     target_dir = out_dir or manifests_dir()
     scan = scan_eligible_records(language, split)
@@ -247,7 +255,9 @@ def build_manifest(language: str = "krio", split: str = "train", out_dir: Path |
     target_dir.mkdir(parents=True, exist_ok=True)
     out_path = target_dir / f"{manifest.manifest_id}.manifest.json"
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(manifest.model_dump(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(
+        json.dumps(manifest.model_dump(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     os.replace(tmp, out_path)
     return out_path
 

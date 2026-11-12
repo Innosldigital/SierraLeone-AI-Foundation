@@ -5,6 +5,7 @@ Tracks which model artifacts are loaded in memory for serving.
 The `/health/ready` endpoint uses ModelState to determine readiness rather
 than hardcoded or metadata-level language status dictionaries.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

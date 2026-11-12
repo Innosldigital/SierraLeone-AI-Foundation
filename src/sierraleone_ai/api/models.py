@@ -1,4 +1,5 @@
 """Pydantic models for the API request/response layer (SLAI-012 / SLAI-027)."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

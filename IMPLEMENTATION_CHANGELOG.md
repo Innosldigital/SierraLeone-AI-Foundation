@@ -40,7 +40,7 @@
   - Replaced unverified Krio strings in tests with neutral `TEST_FIXTURE_*` strings and catalogued all remaining template strings in `docs/NATIVE_REVIEW_QUEUE.md`.
 
 - **SLAI-006 — Secret handling for `HF_TOKEN` (`src/sierraleone_ai/config.py`, `.env.example`)**
-  - Changed `Settings.hf_token` to `SecretStr | None` with ` validation_alias=AliasChoices("SLAI_HF_TOKEN", "HF_TOKEN")` so neither `repr(settings)` nor `str(settings)` leaks token values.
+  - Changed `Settings.hf_token` to `SecretStr` with default `SecretStr("")` and `validation_alias=AliasChoices("SLAI_HF_TOKEN", "HF_TOKEN")` so neither `repr(settings)` nor `str(settings)` leaks token values.
 
 - **SLAI-007 — Held-out benchmark integrity & contamination guard (`src/sierraleone_ai/evaluation/benchmarks.py`, `src/sierraleone_ai/datasets/loader.py`)**
   - Implemented `text_fingerprint()` (NFC + lowercase + collapsed whitespace SHA-256), `benchmark_fingerprints()`, `check_contamination()`, and `assert_held_out_integrity()`.
@@ -66,9 +66,9 @@
   - Enforced `"voice_synthesis"` consent in `check_tts_recording_quality()` (ASR consent alone is rejected).
   - Added `scan_jsonl_for_pii()` and `export_for_release()`.
 
-- **SLAI-026 — Two-native-speaker review enforcement (`src/sierraleone_ai/datasets/schema.py`, `datasets/krio/cleaned/example_krio_text.jsonl`, `datasets/krio/translations/example_translations.jsonl`, `datasets/krio/conversations/example_agricultural_qa.jsonl`, `benchmarks/krio/held_out_eval_schema.jsonl`)**
-  - Added `ReviewerSignoff` model (`reviewer_id`, `is_native_sl_krio_speaker`, `reviewed_on`, `verdict`, `notes`).
-  - `DatasetMetadata` validator enforces that `ValidationStatus.VALIDATED` requires at least 2 distinct native speaker approvals (`is_native_sl_krio_speaker=True`, `verdict="approve"`), `contributor_consent=True`, and non-unknown licence.
+- **SLAI-026 — Two-native-speaker review enforcement (`src/sierraleone_ai/datasets/schema.py`, `datasets/krio/cleaned/example_krio_monolingual.jsonl`, `datasets/krio/translations/example_translations_en_kri.jsonl`, `datasets/krio/conversations/example_agricultural_qa.jsonl`, `benchmarks/krio/held_out_eval_schema.jsonl`)**
+  - Added `ReviewerSignoff` model (`reviewer_id`, `is_native_sl_krio_speaker` / `is_native_speaker_of_record_language`, `reviewed_on`, `verdict`).
+  - `DatasetMetadata` validator enforces that `ValidationStatus.VALIDATED` requires at least 2 distinct native speaker approvals (`is_native_speaker_of_record_language=True`, `verdict="approve"`), `contributor_consent=True`, and non-unknown licence.
   - Set `validation_status="unvalidated"` and `contributor_consent=false` on all template JSONL files.
 
 ### P1 Findings
@@ -85,7 +85,7 @@
   - Anchored `project_root`, `data_dir`, `benchmarks_dir`, and `models_dir` to `Path(__file__).resolve().parents[2]` and added `language_data_dir()` / `language_benchmark_dir()` helpers.
 
 - **SLAI-011 — Training pipeline placeholder model guard (`src/sierraleone_ai/training/pipeline.py`)**
-  - Replaced `base_model: str = "TBD — select after research/model_comparison.md evaluation"` with a Pydantic `@field_validator` that rejects `"TBD"` or empty strings.
+  - Added execution entry-point validation rejecting `"TBD"` or empty strings in `base_model_repo`, and enforced `_assert_not_raw_path()`.
 
 - **SLAI-012 — TTS quality gate fail-closed on `None` (`src/sierraleone_ai/speech/tts.py`)**
   - `check_tts_recording_quality()` now explicitly fails when `snr_db`, `recording_environment`, `duration_seconds`, or `"voice_synthesis"` consent is missing.
@@ -145,6 +145,38 @@
 
 - **SLAI-021 — Clean source packaging & CI guard (`.gitignore`, `.github/workflows/ci.yml`, `scripts/make_source_archive.py`, `scripts/make_source_archive.sh`)**
   - Updated `.gitignore` (including `datasets/**/quarantine/`), added CI checks rejecting `.venv/`, `.env`, and model weight binaries, and added `scripts/make_source_archive.py` / `scripts/make_source_archive.sh` to produce `SierraLeone-AI-Foundation-clean.zip`.
+
+---
+
+## Platform Audit (`PA-001` … `PA-025`) Cross-Reference & Remediation
+
+| Audit Finding ID | Severity | Focus Area | Original Finding Reference | Remediated In |
+|---|---|---|---|---|
+| `PA-001` | Critical | Readiness counts only eligible records from verified dataset manifest | SLAI-001, SLAI-002 | `src/sierraleone_ai/training/guard.py`, `src/sierraleone_ai/datasets/manifest.py` |
+| `PA-002` | Critical | Loader fail-closed eligibility policy with allow-list sources | SLAI-001, SLAI-022 | `src/sierraleone_ai/datasets/eligibility.py`, `src/sierraleone_ai/datasets/loader.py` |
+| `PA-003` | High | Strict consent scopes (`text_training`, `speech_recognition`, etc.) | SLAI-025 | `src/sierraleone_ai/datasets/schema.py`, `src/sierraleone_ai/datasets/eligibility.py` |
+| `PA-004` | High | Benchmark guard (`prompt`, `turns`), BenchmarkItem, and manifest | SLAI-007 | `src/sierraleone_ai/evaluation/benchmarks.py`, `src/sierraleone_ai/datasets/schema.py` |
+| `PA-005` | High | Truthful model registry (`models/candidates.json`, no false NLLB Krio) | SLAI-005, SLAI-032 | `models/candidates.json`, `src/sierraleone_ai/models/registry.py` |
+| `PA-006` | High | Deny-by-default gitignore for datasets and benchmarks; archive allow-list | SLAI-021 | `.gitignore`, `scripts/make_source_archive.py` |
+| `PA-007` | Medium | Quarantine and error files excluded from readiness | SLAI-002, SLAI-022 | `src/sierraleone_ai/training/guard.py`, `src/sierraleone_ai/datasets/manifest.py` |
+| `PA-008` | Medium | Source register allow-list enforcement | SLAI-025 | `src/sierraleone_ai/datasets/loader.py` |
+| `PA-009` | Medium | BOM handling with `utf-8-sig` across loaders | SLAI-022 | `src/sierraleone_ai/datasets/loader.py` |
+| `PA-010` | Medium | Bound training approval manifest (task, model, split, manifest hashes) | SLAI-024 | `src/sierraleone_ai/training/guard.py`, `src/sierraleone_ai/training/pipeline.py` |
+| `PA-011` | Medium | Schema v2 with fail-closed defaults, contributor IDs, chunked SHA-256 | SLAI-013, SLAI-025, SLAI-026 | `src/sierraleone_ai/datasets/schema.py`, `scripts/migrate_schema_v1_to_v2.py` |
+| `PA-012` | Medium | Audio format verification (magic bytes for WAV, MP4, AMR, AAC) & edge limits | SLAI-012 | `src/sierraleone_ai/api/app.py` |
+| `PA-013` | Medium | `/translate` validation (one side English), ModelState-based `/health/ready` | SLAI-012 | `src/sierraleone_ai/api/app.py`, `src/sierraleone_ai/serving/state.py` |
+| `PA-014` | Medium | Anchored `.env` path, absolute directory overrides, `slai serve` | SLAI-010 | `src/sierraleone_ai/config.py`, `.env.example`, `src/sierraleone_ai/cli.py` |
+| `PA-015` | Medium | Multi-OS CI matrix (Ubuntu + Windows), denylist scan, uv setup | SLAI-015, SLAI-021 | `.github/workflows/ci.yml`, `tests/krio_strings_denylist.txt` |
+| `PA-016` | Medium | Truthful `slai validate-file` and dynamic `slai status` | SLAI-020 | `src/sierraleone_ai/cli.py` |
+| `PA-017` | Medium | Documentation updates across all guidebooks | SLAI-005, SLAI-018 | `documentation/DATASET_FORMAT.md`, `CLAUDE.md`, `README.md`, etc. |
+| `PA-018` | Medium | Sacrebleu reporting path with official signature string; two-row DP Levenshtein | SLAI-008 | `src/sierraleone_ai/evaluation/reporting.py`, `src/sierraleone_ai/evaluation/metrics.py` |
+| `PA-019` | Low | CRLF normalisation order, post-whitespace overlong checking, spelling note for `comot` | SLAI-016, SLAI-030 | `src/sierraleone_ai/preprocessing/krio_normalizer.py` |
+| `PA-020` | Low | Tokenizer audit error handling, `tokenizer_revision`, and `require_validated` default | SLAI-029 | `src/sierraleone_ai/evaluation/tokenizer_audit.py` |
+| `PA-021` | Low | Cleaned `ReadinessItem`, `LoadReport`, and stats header "Records" | SLAI-002, SLAI-022 | `src/sierraleone_ai/training/guard.py`, `src/sierraleone_ai/datasets/stats.py` |
+| `PA-022` | Low | Atomic write for speaker split manifests and logged split ratios | SLAI-023 | `src/sierraleone_ai/preprocessing/split_manager.py` |
+| `PA-023` | Low | TTS audio file verification, casefold environment, and ASR record validation | SLAI-012, SLAI-013 | `src/sierraleone_ai/speech/tts.py`, `src/sierraleone_ai/speech/asr.py` |
+| `PA-024` | Low | Formalized experiment ladder (baseline_eval -> sft_lora -> cpt) | SLAI-011, SLAI-031 | `documentation/MODEL_TRAINING_GUIDE.md`, `src/sierraleone_ai/training/pipeline.py` |
+| `PA-025` | Low | Clean test suite (zero warnings/skips) and full test coverage | SLAI-015 | `pyproject.toml`, test suite |
 
 ---
 

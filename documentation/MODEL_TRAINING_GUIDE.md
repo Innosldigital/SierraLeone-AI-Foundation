@@ -8,16 +8,48 @@
 
 ---
 
-## Strategy
+## Strategy: The Experiment Ladder (PA-024)
 
-We are NOT training a large language model from randomly initialised weights.
+We are NOT training a large language model from randomly initialised weights, nor should we run expensive continued pre-training (CPT) first on a low-resource corpus (~1M tokens).
 
-**Approach:**
-1. Select a suitable open-weight multilingual base model (see Model Research below).
-2. Apply **continued pre-training** on validated Krio text (`datasets/krio/validated/`) when sufficient corpus scale exists, or start with SFT/LoRA on native-reviewed instruction/translation pairs.
-3. Apply **instruction fine-tuning** on conversations, Q&A pairs and translation pairs.
-4. Use **LoRA/QLoRA** for parameter-efficient fine-tuning to reduce hardware requirements.
-5. Evaluate with native speakers before any claim of fluency.
+The platform follows a strict **baseline-first experiment ladder**:
+
+```
+[ Stage 1: baseline_eval ]
+       │
+       ▼
+[ Stage 2: sft_lora ]
+       │
+       ▼
+[ Stage 3: cpt (optional) ]
+```
+
+### Stage 1: `baseline_eval` (No training, zero GPU training spend)
+- Zero-shot and few-shot evaluation of candidate models on the locked held-out benchmark (`benchmarks/krio/`).
+- Establishes empirical ground-truth performance before any adaptation.
+- Produces baseline chrF++ and BLEU metrics.
+
+### Stage 2: `sft_lora` (Instruction Fine-Tuning)
+- Parameter-efficient fine-tuning (PEFT) using LoRA or 4-bit QLoRA on verified Krio instruction/translation pairs (`datasets/krio/validated/`).
+- Directly compares against Stage 1 baselines using identical prompts, metrics, and held-out benchmark items.
+- Recommended LoRA learning rate: `1e-4` to `2e-4` (QLoRA) rather than full fine-tune rates (`2e-5`).
+- Target modules: `"all-linear"` (supported in recent PEFT) or explicit projection layers (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`).
+- `modules_to_save`: leave empty unless the tokenizer vocabulary was explicitly extended (e.g. `["embed_tokens", "lm_head"]`).
+
+### Stage 3: `cpt` (Continued Pre-Training — Optional)
+- Undertaken **only if**:
+  1. Corpus size justified by Stages 1 & 2 results (requires sufficient scale of validated text).
+  2. Tokenizer audit demonstrates a clear language-modelling gap in base vocabulary.
+- Uses dedicated checkpoints directory (`models/krio-llm/checkpoints-cpt/`).
+
+### Run Tracking
+Each stage writes a machine-readable run record committed to `runs/<run_id>.json` (metadata only, no training data):
+- Git commit hash
+- Lock hash
+- Dataset manifest ID (`manifest_id` + SHA-256)
+- Model repository & revision
+- Random seed
+- Hardware info & metrics (chrF++, BLEU, eval loss)
 
 ---
 

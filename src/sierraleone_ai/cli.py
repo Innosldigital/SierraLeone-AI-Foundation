@@ -2,10 +2,12 @@
 Sierra Leone AI Foundation – command-line interface (SLAI-020 / SLAI-024 / SLAI-029).
 Entry point: `slai`
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 from rich.console import Console
@@ -137,40 +139,78 @@ def check_readiness(
 
 
 @app.command()
-def validate_file(path: str) -> None:
-    """Validate a JSONL dataset file against Pydantic schema rules."""
+def validate_file(
+    path: str = typer.Argument(..., help="Path to JSONL dataset file to validate"),
+    kind: str = typer.Option(
+        "text", "--kind", help="Record kind: text, translation, conversation, audio, benchmark"
+    ),
+    task: str = typer.Option(None, "--task", help="Optional task for eligibility check"),
+    split: str = typer.Option(
+        "train", "--split", help="Split name (train, validation, test, held_out)"
+    ),
+) -> None:
+    """Validate a JSONL dataset file against Pydantic schema and eligibility rules (PA-016)."""
     file_path = Path(path)
     if not file_path.exists():
         console.print(f"[red]Error: File not found: {file_path}[/red]")
         raise typer.Exit(code=1)
 
-    valid_count = 0
-    invalid_count = 0
-    errors: list[str] = []
+    from sierraleone_ai.datasets.eligibility import EligibilityPolicy, Task
+    from sierraleone_ai.datasets.loader import LoadReport, load_jsonl_records, scan_jsonl_for_pii
+    from sierraleone_ai.datasets.schema import (
+        AudioRecord,
+        BenchmarkItem,
+        ConversationRecord,
+        KrioTextRecord,
+        TranslationRecord,
+    )
 
-    with file_path.open(encoding="utf-8") as f:
-        for lineno, line in enumerate(f, 1):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            try:
-                data = json.loads(line)
-                if "metadata" not in data:
-                    invalid_count += 1
-                    errors.append(f"Line {lineno}: missing 'metadata' field")
-                    continue
-                valid_count += 1
-            except Exception as exc:
-                invalid_count += 1
-                errors.append(f"Line {lineno}: {exc}")
+    kind_map: dict[str, tuple[type[Any], Task]] = {
+        "text": (KrioTextRecord, "text_training"),
+        "translation": (TranslationRecord, "translation_training"),
+        "translations": (TranslationRecord, "translation_training"),
+        "conversation": (ConversationRecord, "conversation_training"),
+        "conversations": (ConversationRecord, "conversation_training"),
+        "audio": (AudioRecord, "asr_training"),
+        "benchmark": (BenchmarkItem, "evaluation"),
+    }
+    if kind not in kind_map:
+        console.print(
+            f"[red]Error: Unsupported kind '{kind}'. Choices: {sorted(kind_map.keys())}[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    model_cls, default_task = kind_map[kind]
+    actual_task = cast(Task, task or default_task)
+    policy = EligibilityPolicy(task=actual_task, split=split)
+
+    report: LoadReport[Any] = load_jsonl_records(
+        file_path,
+        model_cls=model_cls,
+        split=split,
+        policy=policy,
+        strict=False,
+    )
+    pii_issues = scan_jsonl_for_pii(file_path)
 
     console.print(f"Validation results for [bold]{file_path.name}[/bold]:")
-    console.print(f"  [green]Valid lines:[/green] {valid_count}")
-    console.print(f"  [red]Invalid lines:[/red] {invalid_count}")
-    if errors:
-        console.print("\nSample errors:")
-        for err in errors[:5]:
-            console.print(f"  [red]•[/red] {err}")
+    console.print(f"  [cyan]Total lines read:[/cyan] {report.total_lines}")
+    console.print(f"  [green]Valid and eligible records:[/green] {len(report.records)}")
+    if report.skipped:
+        console.print("  [yellow]Per-reason skipped records:[/yellow]")
+        for reason, count in sorted(report.skipped.items()):
+            console.print(f"    • {reason}: {count}")
+    if report.issues:
+        console.print(f"  [red]Schema/validation issues ({len(report.issues)} total):[/red]")
+        for issue in report.issues[:10]:
+            console.print(f"    • Line {issue.line}: {issue.error}")
+    if pii_issues:
+        console.print(f"  [red]PII detected ({len(pii_issues)} instances):[/red]")
+        for pii in pii_issues[:10]:
+            console.print(f"    • Line {pii.line}: {pii.error}")
+
+    if report.issues or pii_issues or len(report.records) == 0:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -220,26 +260,79 @@ def serve(
 def status() -> None:
     """
     Show current project state across the 5 canonical levels:
-    `implemented`, `scaffolded`, `not configured`, `not ready`, `operational` (SLAI-020).
+    `implemented`, `scaffolded`, `not configured`, `not ready`, `operational` (SLAI-020 / PA-016).
     """
-    console.print("\n[bold]Sierra Leone AI Foundation – Project Status[/bold]\n")
+    import subprocess
 
-    table = Table(title="Component Status (5-Level Audit State)", show_lines=True)
+    from sierraleone_ai.datasets.manifest import latest_manifest_path, load_manifest
+    from sierraleone_ai.evaluation.benchmarks import check_held_out_integrity
+    from sierraleone_ai.serving.state import model_state
+
+    console.print(f"\n[bold]Sierra Leone AI Foundation v{__version__} – Platform Status[/bold]\n")
+
+    # Git commit
+    git_hash = "unknown"
+    try:
+        git_hash = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], text=True
+        ).strip()
+    except Exception:
+        pass
+
+    # Optional extras check
+    extras_installed: list[str] = []
+    try:
+        import peft  # noqa: F401
+        import trl  # noqa: F401
+
+        extras_installed.append("training")
+    except ImportError:
+        pass
+    try:
+        import soundfile  # noqa: F401
+
+        extras_installed.append("audio")
+    except ImportError:
+        pass
+    try:
+        import sacrebleu  # noqa: F401
+
+        extras_installed.append("eval")
+    except ImportError:
+        pass
+
+    # GPU presence
+    gpu_desc = "None"
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            gpu_desc = f"{torch.cuda.get_device_name(0)} (CUDA)"
+    except Exception:
+        pass
+
+    table = Table(title=f"Component Status (git: {git_hash})", show_lines=True)
     table.add_column("Subsystem", style="cyan")
     table.add_column("State", style="yellow")
     table.add_column("Details")
 
+    # 1. Dataset Schemas & Loader
     table.add_row(
         "Dataset Schemas, Loader & Normaliser",
         "implemented",
         "Strict JSONL validation, consent/licence gates, and NFC normaliser active",
     )
-    table.add_row(
-        "FastAPI Service (`/health/live`, `/health/ready`, 503 stubs)",
-        "scaffolded",
-        "Liveness up; readiness & model routes return 503 until a model is trained",
-    )
 
+    # 2. FastAPI Service
+    if model_state.is_ready():
+        api_state = "operational"
+        api_details = f"Loaded models: {model_state.get_loaded_models()}"
+    else:
+        api_state = "scaffolded"
+        api_details = "Endpoints active; returning 503 until models loaded into ModelState"
+    table.add_row("FastAPI Service", api_state, api_details)
+
+    # 3. Base Model Selection
     recommended = get_recommended()
     n_candidates = len(list_candidates())
     if recommended:
@@ -251,20 +344,47 @@ def status() -> None:
             f"{n_candidates} candidates registered; awaiting tokenizer audit & benchmark",
         )
 
-    krio_readiness = check_dataset_readiness("krio")
-    ready_count = sum(1 for item in krio_readiness.values() if item.ok)
-    total_count = len(krio_readiness)
-    data_state = "implemented" if ready_count == total_count else "not ready"
-    table.add_row(
-        "Krio Training & Benchmark Datasets",
-        data_state,
-        f"{ready_count}/{total_count} dataset readiness thresholds met",
-    )
+    # 4. Krio Dataset Manifest & Readiness
+    latest_krio_manifest = latest_manifest_path("krio", "train")
+    if latest_krio_manifest is not None:
+        try:
+            m = load_manifest(latest_krio_manifest)
+            manifest_details = f"{m.manifest_id}: {sum(m.eligible_counts.values()):,} eligible records across {len(m.files)} files"
+            manifest_state = "implemented"
+        except Exception as exc:
+            manifest_details = f"Invalid manifest: {exc}"
+            manifest_state = "not ready"
+    else:
+        manifest_details = (
+            "No dataset manifest built (run `slai build-manifest krio --split train`)"
+        )
+        manifest_state = "not configured"
+    table.add_row("Dataset Manifest (Krio train)", manifest_state, manifest_details)
 
+    # 5. Held-Out Benchmark Integrity
+    bench_result = check_held_out_integrity("krio")
+    if bench_result["ok"]:
+        bench_state = "implemented"
+        bench_details = f"{bench_result['count']} items verified against manifest"
+    else:
+        bench_state = "not ready"
+        bench_details = f"Not ready ({', '.join(bench_result['reasons'])})"
+    table.add_row("Held-Out Benchmark", bench_state, bench_details)
+
+    # 6. Models & Serving
+    if model_state.is_ready():
+        model_state_str = "operational"
+        model_details = f"Operational models: {model_state.get_loaded_models()}"
+    else:
+        model_state_str = "not ready"
+        model_details = "No trained models operational yet"
+    table.add_row("Model Operational State", model_state_str, model_details)
+
+    # 7. Hardware & Extras
     table.add_row(
-        "LLM / Translation / ASR / TTS Models",
-        "not ready",
-        "No trained model is operational yet (0 operational models)",
+        "Hardware & Optional Extras",
+        "implemented" if extras_installed else "scaffolded",
+        f"Extras: {extras_installed or ['none']}; GPU: {gpu_desc}",
     )
 
     console.print(table)

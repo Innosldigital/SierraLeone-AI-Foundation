@@ -10,57 +10,64 @@ Excludes:
   - model weights (*.safetensors, *.bin, *.pt, *.pth, *.gguf, *.ckpt)
   - private raw/audio/quarantine datasets (preserving .gitkeep files)
 """
+
 from __future__ import annotations
 
 import argparse
 import zipfile
 from pathlib import Path, PurePosixPath
 
-EXCLUDED_DIRS: frozenset[str] = frozenset({
-    ".git",
-    ".venv",
-    "venv",
-    "env",
-    "ENV",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    "dist",
-    "build",
-    ".eggs",
-    "secrets",
-    "logs",
-    "htmlcov",
-    "quarantine",
-})
+EXCLUDED_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "env",
+        "ENV",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "dist",
+        "build",
+        ".eggs",
+        "secrets",
+        "logs",
+        "htmlcov",
+        "quarantine",
+    }
+)
 
-EXCLUDED_SUFFIXES: frozenset[str] = frozenset({
-    ".pyc",
-    ".pyo",
-    ".pyd",
-    ".safetensors",
-    ".bin",
-    ".pt",
-    ".pth",
-    ".gguf",
-    ".ckpt",
-    ".parquet",
-    ".arrow",
-    ".pem",
-    ".key",
-    ".log",
-    ".whl",
-    ".egg",
-})
+EXCLUDED_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".pyc",
+        ".pyo",
+        ".pyd",
+        ".safetensors",
+        ".bin",
+        ".pt",
+        ".pth",
+        ".gguf",
+        ".ckpt",
+        ".parquet",
+        ".arrow",
+        ".pem",
+        ".key",
+        ".log",
+        ".whl",
+        ".egg",
+    }
+)
 
-EXCLUDED_FILES: frozenset[str] = frozenset({
-    ".env",
-    ".coverage",
-    "coverage.xml",
-    ".DS_Store",
-    "Thumbs.db",
-})
+EXCLUDED_FILES: frozenset[str] = frozenset(
+    {
+        ".env",
+        ".coverage",
+        "coverage.xml",
+        ".DS_Store",
+        "Thumbs.db",
+    }
+)
 
 
 def _data_allowed(rel: PurePosixPath) -> bool:
@@ -123,7 +130,9 @@ def build_clean_archive(project_root: Path, output_zip: Path) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create clean source archive for SierraLeone-AI-Foundation")
+    parser = argparse.ArgumentParser(
+        description="Create clean source archive for SierraLeone-AI-Foundation"
+    )
     default_root = Path(__file__).resolve().parents[1]
     parser.add_argument(
         "--output",

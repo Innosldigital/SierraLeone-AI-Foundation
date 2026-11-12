@@ -5,6 +5,7 @@ Uses pydantic-settings so values can be overridden via environment variables or 
 Environment variable prefix: SLAI_
 Exception: HF_TOKEN is also accepted without the prefix (standard HuggingFace convention).
 """
+
 from __future__ import annotations
 
 import os
@@ -19,10 +20,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # regardless of the current working directory (editable installs, scripts, etc.)
 # Override with SLAI_PROJECT_ROOT=/absolute/path if needed.
 # ---------------------------------------------------------------------------
-_DEFAULT_ROOT = Path(os.environ.get(
-    "SLAI_PROJECT_ROOT",
-    str(Path(__file__).resolve().parents[2]),
-))
+_DEFAULT_ROOT = Path(
+    os.environ.get(
+        "SLAI_PROJECT_ROOT",
+        str(Path(__file__).resolve().parents[2]),
+    )
+)
 
 
 class Settings(BaseSettings):
@@ -66,6 +69,7 @@ class Settings(BaseSettings):
                 return []
             if v.startswith("[") and v.endswith("]"):
                 import json
+
                 try:
                     loaded = json.loads(v)
                     if isinstance(loaded, list):
@@ -79,7 +83,9 @@ class Settings(BaseSettings):
 
     # Safety gate – prevents accidental expensive training
     allow_training: bool = False
-    min_benchmark_items: int = 300  # Minimum validated held-out benchmark items before training (PA-004)
+    min_benchmark_items: int = (
+        300  # Minimum validated held-out benchmark items before training (PA-004)
+    )
 
     # HuggingFace token — stored as SecretStr so it never appears in repr/logs.
     # Accepts both HF_TOKEN (standard HuggingFace convention) and SLAI_HF_TOKEN.

@@ -7,6 +7,7 @@ for human evaluation of Krio language model outputs.
 Native speaker evaluation is mandatory before any public model claims.
 Automated metrics alone are INSUFFICIENT to validate Krio language quality.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 class LikertScore(IntEnum):
     """Five-point Likert scale used across all human evaluation dimensions."""
+
     VERY_POOR = 1
     POOR = 2
     ACCEPTABLE = 3
@@ -44,18 +46,14 @@ class KrioFluencyEvaluation(BaseModel):
         validation_alias=AliasChoices("evaluator_native_krio", "evaluator_native_speaker"),
         description="Is the evaluator a native Sierra Leonean Krio speaker?",
     )
-    evaluation_date: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    evaluation_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Model output under evaluation
     model_id: str
     model_version: str
     prompt: str
     model_output: str
-    reference_output: str | None = Field(
-        None, description="Human reference if available"
-    )
+    reference_output: str | None = Field(None, description="Human reference if available")
 
     # Evaluation dimensions
     grammatical_correctness: LikertScore | None = Field(
@@ -95,7 +93,8 @@ class KrioFluencyEvaluation(BaseModel):
     def low_score_requires_notes(self) -> KrioFluencyEvaluation:
         """Scores of VERY_POOR or POOR must be accompanied by written notes."""
         scored = [
-            s for s in [
+            s
+            for s in [
                 self.grammatical_correctness,
                 self.vocabulary_appropriateness,
                 self.naturalness,
@@ -115,7 +114,8 @@ class KrioFluencyEvaluation(BaseModel):
     def mean_score(self) -> float | None:
         """Mean score across all rated dimensions."""
         scores = [
-            s for s in [
+            s
+            for s in [
                 self.grammatical_correctness,
                 self.vocabulary_appropriateness,
                 self.naturalness,
@@ -133,9 +133,7 @@ class TranslationEvaluation(BaseModel):
     evaluation_id: str
     evaluator_id: str
     evaluator_native_krio: bool
-    evaluation_date: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    evaluation_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     source_text: str
     source_language: str

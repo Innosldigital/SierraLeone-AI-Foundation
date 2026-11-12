@@ -5,6 +5,7 @@ IMPORTANT: All model endpoints are STUBS.
 No model is currently trained or operational.
 Endpoints return informative HTTP 503 responses until models are available.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -46,9 +47,7 @@ app = FastAPI(
 
 # CORS configuration (PA-012 / PA-014):
 # Default empty list means no CORS unless configured or in debug mode.
-_cors_origins = settings.cors_origins or (
-    ["http://localhost:3000"] if settings.api_debug else []
-)
+_cors_origins = settings.cors_origins or (["http://localhost:3000"] if settings.api_debug else [])
 if _cors_origins:
     app.add_middleware(
         CORSMiddleware,
@@ -82,22 +81,24 @@ async def check_content_length_limit(request: Request, call_next: Any) -> Respon
     return await call_next(request)
 
 
-_ALLOWED_AUDIO_CONTENT_TYPES: frozenset[str] = frozenset({
-    "audio/wav",
-    "audio/x-wav",
-    "audio/wave",
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/ogg",
-    "audio/flac",
-    "audio/webm",
-    "audio/mp4",
-    "audio/x-m4a",
-    "audio/aac",
-    "audio/3gpp",
-    "audio/amr",
-    "application/octet-stream",
-})
+_ALLOWED_AUDIO_CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "audio/wav",
+        "audio/x-wav",
+        "audio/wave",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/ogg",
+        "audio/flac",
+        "audio/webm",
+        "audio/mp4",
+        "audio/x-m4a",
+        "audio/aac",
+        "audio/3gpp",
+        "audio/amr",
+        "application/octet-stream",
+    }
+)
 
 
 def _is_valid_audio_header(payload: bytes) -> bool:
@@ -343,6 +344,8 @@ async def synthesize(request: SynthesizeRequest) -> SynthesizeResponse:
 
     **Status**: Not yet operational. Returns 503 until a TTS model is trained.
     """
-    lang_str = request.language.value if hasattr(request.language, "value") else str(request.language)
+    lang_str = (
+        request.language.value if hasattr(request.language, "value") else str(request.language)
+    )
     _require_language(lang_str, allow_english=False)
     raise _model_not_ready()

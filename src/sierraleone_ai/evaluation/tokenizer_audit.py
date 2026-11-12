@@ -13,6 +13,7 @@ model weights. Computes:
 Refuses to run on `example_*` files, `SCHEMA_TEMPLATE` / `BENCHMARK_SCHEMA_TEMPLATE`
 records, or corpora with fewer than `min_sentences` (default 1,000) native-reviewed sentences.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,6 +54,9 @@ class TokenizerAuditReport:
     top_fragmented_words: dict[str, int] = field(default_factory=dict)
     open_vowel_handling: dict[str, list[str]] = field(default_factory=dict)
     english_sequence_length_overhead: float | None = None
+    tokenizer_revision: str | None = None
+    transformers_version: str | None = None
+    parse_errors: list[str] = field(default_factory=list)
     note: str = (
         "Tokenizer fertility is one selection criterion among several "
         "(alongside held-out Krio benchmark quality, VRAM footprint, and licence). "
@@ -86,6 +90,7 @@ def audit_tokenizer_on_corpus(
     *,
     min_sentences: int = 1000,
     require_validated: bool = True,
+    allow_partial: bool = False,
 ) -> TokenizerAuditReport:
     """
     Run the reproducible tokenizer audit on a JSONL corpus (SLAI-029).
@@ -105,13 +110,21 @@ def audit_tokenizer_on_corpus(
 
     krio_sentences: list[str] = []
     parallel_pairs: list[tuple[str, str]] = []
+    parse_errors: list[str] = []
+
+    allowed_statuses = ("validated", "partially_validated") if allow_partial else ("validated",)
 
     with corpus_path.open(encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            row = json.loads(stripped)
+            try:
+                row = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                parse_errors.append(f"{corpus_path.name}:{lineno}: invalid JSON ({exc})")
+                continue
+
             meta = row.get("metadata", {})
             source = str(meta.get("source") or row.get("source") or "")
             if source.upper().startswith(_TEMPLATE_PREFIXES):
@@ -121,7 +134,7 @@ def audit_tokenizer_on_corpus(
             status = str(meta.get("validation_status") or row.get("validation_status") or "")
             if status == "rejected":
                 continue
-            if require_validated and status not in ("validated", "partially_validated"):
+            if require_validated and status not in allowed_statuses:
                 continue
 
             krio_text = row.get("text") or row.get("target_text") or row.get("normalised_text")
@@ -130,7 +143,9 @@ def audit_tokenizer_on_corpus(
                 norm_krio = unicodedata.normalize("NFC", krio_text.strip())
                 krio_sentences.append(norm_krio)
                 if isinstance(eng_text, str) and eng_text.strip():
-                    parallel_pairs.append((norm_krio, unicodedata.normalize("NFC", eng_text.strip())))
+                    parallel_pairs.append(
+                        (norm_krio, unicodedata.normalize("NFC", eng_text.strip()))
+                    )
 
     if len(krio_sentences) < min_sentences:
         raise ValueError(
@@ -140,6 +155,18 @@ def audit_tokenizer_on_corpus(
 
     tok = tokenizer if tokenizer is not None else load_hf_tokenizer_only(tokenizer_id)
     unk_id = getattr(tok, "unk_token_id", None)
+
+    tokenizer_revision: str | None = None
+    if hasattr(tok, "init_kwargs") and isinstance(tok.init_kwargs, dict):
+        tokenizer_revision = tok.init_kwargs.get("revision")
+
+    transformers_version: str | None = None
+    try:
+        import transformers
+
+        transformers_version = getattr(transformers, "__version__", None)
+    except ImportError:
+        pass
 
     total_words = 0
     total_chars = 0
@@ -193,4 +220,7 @@ def audit_tokenizer_on_corpus(
         top_fragmented_words=top_fragmented,
         open_vowel_handling=open_vowel_handling,
         english_sequence_length_overhead=overhead,
+        tokenizer_revision=tokenizer_revision,
+        transformers_version=transformers_version,
+        parse_errors=parse_errors,
     )

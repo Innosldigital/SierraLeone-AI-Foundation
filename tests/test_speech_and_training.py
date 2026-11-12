@@ -1,4 +1,5 @@
 """Tests for speaker leakage prevention, ASR/TTS infrastructure, and training guard."""
+
 import hashlib
 import json
 from datetime import date
@@ -160,6 +161,60 @@ def test_tts_recording_quality_check_fails_missing_duration():
     assert any("duration not measured" in issue for issue in issues)
 
 
+def test_tts_recording_quality_casefold_environment():
+    """Environment comparison should be case-insensitive (PA-023)."""
+    rec = VerifiedSpeechTranscriptionRecord(
+        metadata=_make_validated_metadata(),
+        audio_file_path="krio/audio/spk_01/rec.wav",
+        transcript="TEST_FIXTURE_TRANSCRIPT_001",
+        speaker_id="spk_01",
+        transcriber_id="t1",
+        verifier_id="v1",
+        sample_rate_hz=24000,
+        snr_db=30.0,
+        recording_environment="Studio",  # Title case
+        duration_seconds=2.5,
+    )
+    eligible, issues = check_tts_recording_quality(rec)
+    assert eligible is True
+    assert issues == []
+
+
+def test_validate_asr_record():
+    """validate_asr_record validates duration bounds and dual verification (PA-023)."""
+    from sierraleone_ai.speech.asr import ASRTrainingConfig, validate_asr_record
+
+    cfg = ASRTrainingConfig(min_duration_seconds=1.0, max_duration_seconds=5.0)
+
+    # Valid record with 2 approvals
+    rec = VerifiedSpeechTranscriptionRecord(
+        metadata=_make_validated_metadata(),
+        audio_file_path="krio/audio/spk_01/rec.wav",
+        transcript="TEST_FIXTURE_TRANSCRIPT_001",
+        speaker_id="spk_01",
+        transcriber_id="t1",
+        verifier_id="v1",
+        duration_seconds=2.5,
+    )
+    ok, issues = validate_asr_record(rec, cfg)
+    assert ok is True
+    assert issues == []
+
+    # Overlong record
+    rec_long = VerifiedSpeechTranscriptionRecord(
+        metadata=_make_validated_metadata(),
+        audio_file_path="krio/audio/spk_01/rec.wav",
+        transcript="TEST_FIXTURE_TRANSCRIPT_001",
+        speaker_id="spk_01",
+        transcriber_id="t1",
+        verifier_id="v1",
+        duration_seconds=10.0,
+    )
+    ok, issues = validate_asr_record(rec_long, cfg)
+    assert ok is False
+    assert any("exceeds maximum" in issue for issue in issues)
+
+
 def test_training_guard_blocks_by_default():
     with pytest.raises(RuntimeError, match="TRAINING GUARD"):
         require_training_approval("unit test training")
@@ -288,9 +343,7 @@ def test_training_guard_rejects_manifest_referencing_raw_or_mismatched_sha256(
                 "base_model_revision": "abc1234",
                 "model_licence_review": licence_review,
                 "dataset_versions": {"train": "0.1.0"},
-                "dataset_sha256_hashes": {
-                    "datasets/krio/cleaned/train.jsonl": "0" * 64
-                },
+                "dataset_sha256_hashes": {"datasets/krio/cleaned/train.jsonl": "0" * 64},
                 "dataset_manifest_id": "krio-train-v1",
                 "split_manifest_id": "speaker_splits_v1",
                 "benchmark_id": "bench_v1",
@@ -343,9 +396,7 @@ def test_training_guard_dry_run_extended_plan():
     assert "resolved_config_paths" in plan
 
 
-def test_training_guard_rejects_manifest_for_different_model(
-    tmp_path: Path, monkeypatch
-):
+def test_training_guard_rejects_manifest_for_different_model(tmp_path: Path, monkeypatch):
     """PA-010: Approval manifest base_model_id != selected base model must raise RuntimeError."""
     import sierraleone_ai.config as cfg_module
     from sierraleone_ai.training.guard import require_training_approval
@@ -358,11 +409,13 @@ def test_training_guard_rejects_manifest_for_different_model(
     models_dir = tmp_path / "models"
     models_dir.mkdir(parents=True)
     (models_dir / "selected_base_model.json").write_text(
-        json.dumps({
-            "hf_repo": "Qwen/Qwen2.5-3B",
-            "tokenizer_audit_completed": True,
-            "native_benchmark_completed": True,
-        }),
+        json.dumps(
+            {
+                "hf_repo": "Qwen/Qwen2.5-3B",
+                "tokenizer_audit_completed": True,
+                "native_benchmark_completed": True,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -386,16 +439,18 @@ def test_training_guard_rejects_manifest_for_different_model(
     ds_manifest = manifests_dir / "krio-train-v1.manifest.json"
     rel_clean_path = str(clean_file.relative_to(tmp_path)).replace("\\", "/")
     ds_manifest.write_text(
-        json.dumps({
-            "schema_version": 2,
-            "language": "krio",
-            "split": "train",
-            "version": 1,
-            "files": {rel_clean_path: real_sha},
-            "eligible_counts": {"text_training": 100000},
-            "skipped": {},
-            "built_at": "2026-11-12T00:00:00Z",
-        }),
+        json.dumps(
+            {
+                "schema_version": 2,
+                "language": "krio",
+                "split": "train",
+                "version": 1,
+                "files": {rel_clean_path: real_sha},
+                "eligible_counts": {"text_training": 100000},
+                "skipped": {},
+                "built_at": "2026-11-12T00:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -408,21 +463,23 @@ def test_training_guard_rejects_manifest_for_different_model(
     }
     approval_path = tmp_path / "approval.json"
     approval_path.write_text(
-        json.dumps({
-            "run_id": "run_diff_model",
-            "task": "chat_llm_sft",
-            "base_model_id": "Different/Model-7B",
-            "base_model_revision": "abc1234",
-            "model_licence_review": licence_review,
-            "dataset_versions": {"train": "0.1.0"},
-            "dataset_sha256_hashes": {rel_clean_path: real_sha},
-            "dataset_manifest_id": "krio-train-v1",
-            "split_manifest_id": "speaker_splits_v1",
-            "benchmark_id": "bench_v1",
-            "estimated_gpu_hours": 2.0,
-            "estimated_cost_usd": 4.0,
-            "approver": "project_owner",
-        }),
+        json.dumps(
+            {
+                "run_id": "run_diff_model",
+                "task": "chat_llm_sft",
+                "base_model_id": "Different/Model-7B",
+                "base_model_revision": "abc1234",
+                "model_licence_review": licence_review,
+                "dataset_versions": {"train": "0.1.0"},
+                "dataset_sha256_hashes": {rel_clean_path: real_sha},
+                "dataset_manifest_id": "krio-train-v1",
+                "split_manifest_id": "speaker_splits_v1",
+                "benchmark_id": "bench_v1",
+                "estimated_gpu_hours": 2.0,
+                "estimated_cost_usd": 4.0,
+                "approver": "project_owner",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -468,16 +525,18 @@ def test_training_guard_rejects_file_not_covered_by_dataset_manifest(
     manifests_dir.mkdir(parents=True)
     ds_manifest = manifests_dir / "krio-train-v1.manifest.json"
     ds_manifest.write_text(
-        json.dumps({
-            "schema_version": 2,
-            "language": "krio",
-            "split": "train",
-            "version": 1,
-            "files": {rel_p1: sha1},
-            "eligible_counts": {"text_training": 10},
-            "skipped": {},
-            "built_at": "2026-11-12T00:00:00Z",
-        }),
+        json.dumps(
+            {
+                "schema_version": 2,
+                "language": "krio",
+                "split": "train",
+                "version": 1,
+                "files": {rel_p1: sha1},
+                "eligible_counts": {"text_training": 10},
+                "skipped": {},
+                "built_at": "2026-11-12T00:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -492,21 +551,23 @@ def test_training_guard_rejects_file_not_covered_by_dataset_manifest(
     # Approval manifest references both file1 and file2
     approval_path = tmp_path / "approval_uncovered.json"
     approval_path.write_text(
-        json.dumps({
-            "run_id": "run_uncovered",
-            "task": "chat_llm_sft",
-            "base_model_id": "Qwen/Qwen2.5-3B",
-            "base_model_revision": "abc1234",
-            "model_licence_review": licence_review,
-            "dataset_versions": {"train": "0.1.0"},
-            "dataset_sha256_hashes": {rel_p1: sha1, rel_p2: sha2},
-            "dataset_manifest_id": "krio-train-v1",
-            "split_manifest_id": "speaker_splits_v1",
-            "benchmark_id": "bench_v1",
-            "estimated_gpu_hours": 1.0,
-            "estimated_cost_usd": 2.0,
-            "approver": "owner",
-        }),
+        json.dumps(
+            {
+                "run_id": "run_uncovered",
+                "task": "chat_llm_sft",
+                "base_model_id": "Qwen/Qwen2.5-3B",
+                "base_model_revision": "abc1234",
+                "model_licence_review": licence_review,
+                "dataset_versions": {"train": "0.1.0"},
+                "dataset_sha256_hashes": {rel_p1: sha1, rel_p2: sha2},
+                "dataset_manifest_id": "krio-train-v1",
+                "split_manifest_id": "speaker_splits_v1",
+                "benchmark_id": "bench_v1",
+                "estimated_gpu_hours": 1.0,
+                "estimated_cost_usd": 2.0,
+                "approver": "owner",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -526,11 +587,13 @@ def test_training_guard_rejects_task_mismatch(tmp_path: Path, monkeypatch):
     models_dir = tmp_path / "models"
     models_dir.mkdir(parents=True)
     (models_dir / "selected_base_model.json").write_text(
-        json.dumps({
-            "hf_repo": "Qwen/Qwen2.5-3B",
-            "tokenizer_audit_completed": True,
-            "native_benchmark_completed": True,
-        }),
+        json.dumps(
+            {
+                "hf_repo": "Qwen/Qwen2.5-3B",
+                "tokenizer_audit_completed": True,
+                "native_benchmark_completed": True,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -551,16 +614,18 @@ def test_training_guard_rejects_task_mismatch(tmp_path: Path, monkeypatch):
     ds_manifest = manifests_dir / "krio-train-v1.manifest.json"
     rel_clean_path = str(clean_file.relative_to(tmp_path)).replace("\\", "/")
     ds_manifest.write_text(
-        json.dumps({
-            "schema_version": 2,
-            "language": "krio",
-            "split": "train",
-            "version": 1,
-            "files": {rel_clean_path: real_sha},
-            "eligible_counts": {"text_training": 100000},
-            "skipped": {},
-            "built_at": "2026-11-12T00:00:00Z",
-        }),
+        json.dumps(
+            {
+                "schema_version": 2,
+                "language": "krio",
+                "split": "train",
+                "version": 1,
+                "files": {rel_clean_path: real_sha},
+                "eligible_counts": {"text_training": 100000},
+                "skipped": {},
+                "built_at": "2026-11-12T00:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -573,21 +638,23 @@ def test_training_guard_rejects_task_mismatch(tmp_path: Path, monkeypatch):
     }
     approval_path = tmp_path / "approval.json"
     approval_path.write_text(
-        json.dumps({
-            "run_id": "run_mismatch_task",
-            "task": "chat_llm_cpt",
-            "base_model_id": "Qwen/Qwen2.5-3B",
-            "base_model_revision": "abc1234",
-            "model_licence_review": licence_review,
-            "dataset_versions": {"train": "0.1.0"},
-            "dataset_sha256_hashes": {rel_clean_path: real_sha},
-            "dataset_manifest_id": "krio-train-v1",
-            "split_manifest_id": "speaker_splits_v1",
-            "benchmark_id": "bench_v1",
-            "estimated_gpu_hours": 2.0,
-            "estimated_cost_usd": 4.0,
-            "approver": "project_owner",
-        }),
+        json.dumps(
+            {
+                "run_id": "run_mismatch_task",
+                "task": "chat_llm_cpt",
+                "base_model_id": "Qwen/Qwen2.5-3B",
+                "base_model_revision": "abc1234",
+                "model_licence_review": licence_review,
+                "dataset_versions": {"train": "0.1.0"},
+                "dataset_sha256_hashes": {rel_clean_path: real_sha},
+                "dataset_manifest_id": "krio-train-v1",
+                "split_manifest_id": "speaker_splits_v1",
+                "benchmark_id": "bench_v1",
+                "estimated_gpu_hours": 2.0,
+                "estimated_cost_usd": 4.0,
+                "approver": "project_owner",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -600,4 +667,3 @@ def test_training_guard_rejects_task_mismatch(tmp_path: Path, monkeypatch):
             base_dir=tmp_path,
             check_readiness=False,
         )
-

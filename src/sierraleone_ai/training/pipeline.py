@@ -10,6 +10,7 @@ Prepares configurations and checkpoint/versioning protocols for:
 All execution entry points enforce `require_training_approval()` so no expensive
 GPU training can start without explicit human review of datasets and base models.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,16 +38,22 @@ class LoRAConfig:
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     target_modules: list[str] = field(
-        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        default_factory=lambda: [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
     )
     bias: str = "none"
     # Quantisation is controlled by AdaptationMethod (qlora_4bit / qlora_8bit).
     # Do not duplicate that decision here with a boolean flag.
     bnb_4bit_quant_type: str = "nf4"
     bnb_4bit_compute_dtype: str = "float16"  # safer default across GPU generations
-    modules_to_save: list[str] = field(
-        default_factory=list
-    )
+    modules_to_save: list[str] = field(default_factory=list)
     # e.g. ["embed_tokens", "lm_head"] if the vocabulary has been extended with Krio tokens.
     # Leave empty when no vocabulary extension is performed.
 
@@ -75,9 +82,7 @@ class ModelVersionMetadata:
     base_model_hf_repo: str = ""
     dataset_version: str = "0.1.0"
     adaptation_method: AdaptationMethod = AdaptationMethod.QLORA_4BIT
-    created_at_utc: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     native_speaker_evaluated: bool = False
     approved_for_deployment: bool = False
 
@@ -101,9 +106,7 @@ class ContinuedPretrainingConfig:
     lora: LoRAConfig = field(default_factory=LoRAConfig)
     # CPT gets its own output directory, separate from SFT checkpoints
     checkpoint: CheckpointPolicy = field(
-        default_factory=lambda: CheckpointPolicy(
-            output_dir=Path("models/krio-llm/checkpoints-cpt")
-        )
+        default_factory=lambda: CheckpointPolicy(output_dir=Path("models/krio-llm/checkpoints-cpt"))
     )
 
     @classmethod
@@ -139,7 +142,9 @@ class InstructionFineTuningConfig:
     pretrained_checkpoint: Path
     language: str = "krio"
     conversations_path: Path = Path("datasets/krio/conversations/conversations_train.jsonl")
-    translations_path: Path = Path("datasets/krio/translations/translations_english_krio_train.jsonl")
+    translations_path: Path = Path(
+        "datasets/krio/translations/translations_english_krio_train.jsonl"
+    )
     max_seq_length: int = 2048
     learning_rate: float = 1e-4
     num_train_epochs: int = 3
@@ -149,9 +154,7 @@ class InstructionFineTuningConfig:
     lora: LoRAConfig = field(default_factory=LoRAConfig)
     # SFT gets its own output directory, separate from CPT checkpoints
     checkpoint: CheckpointPolicy = field(
-        default_factory=lambda: CheckpointPolicy(
-            output_dir=Path("models/krio-llm/checkpoints-sft")
-        )
+        default_factory=lambda: CheckpointPolicy(output_dir=Path("models/krio-llm/checkpoints-sft"))
     )
 
     @classmethod

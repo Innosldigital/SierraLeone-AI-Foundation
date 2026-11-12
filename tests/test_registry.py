@@ -8,6 +8,7 @@ Verifies that:
 - Documented Krio support requires evidence_url.
 - Tiny Aya and DONDO checkpoints are registered with truthful descriptions.
 """
+
 from __future__ import annotations
 
 import json
@@ -75,15 +76,11 @@ class TestRegistry:
 
     def test_every_candidate_has_hf_repo(self):
         for candidate in get_all_candidates():
-            assert candidate.hf_repo, (
-                f"Candidate '{candidate.name}' has no hf_repo set"
-            )
+            assert candidate.hf_repo, f"Candidate '{candidate.name}' has no hf_repo set"
 
     def test_every_candidate_has_source_url(self):
         for candidate in get_all_candidates():
-            assert candidate.source_url, (
-                f"Candidate '{candidate.name}' has no source_url set"
-            )
+            assert candidate.source_url, f"Candidate '{candidate.name}' has no source_url set"
 
     def test_krio_support_documented_requires_evidence_url(self):
         """PA-005: Candidate with krio_support='documented' must have evidence_url."""
@@ -152,4 +149,3 @@ class TestRegistry:
     def test_at_least_five_candidates(self):
         candidates = get_all_candidates()
         assert len(candidates) >= 5, f"Expected ≥5 candidates, got {len(candidates)}"
-

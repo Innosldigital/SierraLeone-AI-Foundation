@@ -12,6 +12,7 @@ Migrates JSONL records:
 - Renames is_native_sl_krio_speaker -> is_native_speaker_of_record_language in reviews
 - Preserves or validates split
 """
+
 from __future__ import annotations
 
 import argparse
@@ -91,8 +92,12 @@ def migrate_file(path: Path, default_split: str = "train") -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Migrate dataset JSONL files from v1 to v2 schema")
-    parser.add_argument("paths", nargs="+", type=Path, help="Paths or globs of JSONL files to migrate")
-    parser.add_argument("--default-split", default="train", help="Default split if missing in record")
+    parser.add_argument(
+        "paths", nargs="+", type=Path, help="Paths or globs of JSONL files to migrate"
+    )
+    parser.add_argument(
+        "--default-split", default="train", help="Default split if missing in record"
+    )
     args = parser.parse_args()
 
     total = 0

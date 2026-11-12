@@ -17,6 +17,7 @@ Languages targeted:
 Status: Foundation phase – dataset infrastructure only.
 No production model is operational yet.
 """
+
 from __future__ import annotations
 
 from typing import Literal, TypedDict
@@ -108,11 +109,7 @@ LANGUAGE_REGISTRY: dict[str, LanguageEntry] = {
 
 # Derived dictionary of Sierra Leonean target languages for API/CLI compatibility
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
-    code: {
-        k: str(v)
-        for k, v in entry.items()
-        if k in ("name", "iso_639_3", "status", "note")
-    }
+    code: {k: str(v) for k, v in entry.items() if k in ("name", "iso_639_3", "status", "note")}
     for code, entry in LANGUAGE_REGISTRY.items()
     if entry.get("is_target_sl_language", False)
 }

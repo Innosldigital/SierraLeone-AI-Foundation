@@ -5,6 +5,7 @@ All tests use temporary JSONL files via pytest's tmp_path fixture and
 monkeypatch settings.data_dir / settings.krio_data_dir so no real dataset
 files are required.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ from sierraleone_ai.datasets.loader import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +94,7 @@ def _record(
 # _apply_policy tests
 # ---------------------------------------------------------------------------
 
+
 class TestApplyPolicy:
     def test_rejected_records_always_excluded(self):
         raw = [_record(status="rejected")]
@@ -111,7 +114,9 @@ class TestApplyPolicy:
 
     def test_no_consent_excluded_when_require_consent(self):
         raw = [_record(consent=False)]
-        admitted, skipped = _apply_policy(raw, "train", LoadPolicy(require_consent=True), "test.jsonl")
+        admitted, skipped = _apply_policy(
+            raw, "train", LoadPolicy(require_consent=True), "test.jsonl"
+        )
         assert len(admitted) == 0
         assert skipped["no_consent"] == 1
 
@@ -143,20 +148,25 @@ class TestApplyPolicy:
 
     def test_split_mismatch_excluded(self):
         raw = [_record(split="test")]  # loading "train" split
-        admitted, skipped = _apply_policy(raw, "train", LoadPolicy(require_consent=False), "test.jsonl")
+        admitted, skipped = _apply_policy(
+            raw, "train", LoadPolicy(require_consent=False), "test.jsonl"
+        )
         assert len(admitted) == 0
         assert any("split_mismatch" in k for k in skipped)
 
     def test_machine_generated_excluded_by_default(self):
         raw = [_record(status="machine_generated", consent=False)]
-        admitted, skipped = _apply_policy(raw, "train", LoadPolicy(require_consent=False), "test.jsonl")
+        admitted, skipped = _apply_policy(
+            raw, "train", LoadPolicy(require_consent=False), "test.jsonl"
+        )
         assert len(admitted) == 0
         assert skipped["machine_generated"] == 1
 
     def test_machine_generated_allowed_when_policy_permits(self):
         raw = [_record(status="machine_generated", consent=False)]
         admitted, _ = _apply_policy(
-            raw, "train",
+            raw,
+            "train",
             LoadPolicy(include_machine_generated=True, require_consent=False, validated_only=False),
             "test.jsonl",
         )
@@ -318,7 +328,9 @@ class TestStrictAndPreviewLoad:
         rec = self._valid_schema_dict(source="jaward_krio_corpus")
         admitted, skipped = _apply_policy([rec], "train", LoadPolicy(), "test.jsonl")
         assert len(admitted) == 0
-        assert any("source_rights_not_approved" in k or "unreviewed_source_rights" in k for k in skipped)
+        assert any(
+            "source_rights_not_approved" in k or "unreviewed_source_rights" in k for k in skipped
+        )
 
     def test_source_not_in_register_excluded_and_approved_included(self):
         """PA-008: Allow-list register excludes unknown source and admits APPROVED source."""
@@ -446,5 +458,3 @@ class TestStrictAndPreviewLoad:
         exported = export_for_release([pub_rec, internal_rec, no_redist_rec])
         assert len(exported) == 1
         assert exported[0].metadata.record_id == "33333333-3333-4333-8333-333333333333"
-
-

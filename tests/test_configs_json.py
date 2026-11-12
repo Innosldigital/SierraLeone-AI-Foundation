@@ -1,6 +1,7 @@
 """
 Tests for training JSON configs (SLAI-011 / SLAI-017).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,4 +26,3 @@ def test_load_sft_config():
     assert cfg.learning_rate == 1e-4
     assert cfg.checkpoint.output_dir == Path("models/krio-llm/checkpoints-sft")
     assert cfg.lora.bnb_4bit_compute_dtype == "float16"
-

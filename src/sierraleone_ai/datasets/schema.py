@@ -4,6 +4,7 @@ Standardized dataset schemas for Sierra Leonean language data.
 Every record in every dataset MUST include the metadata fields defined here.
 This prevents mixing of verified and unverified data and ensures traceability.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -20,6 +21,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator, model_vali
 # Enumerations
 # ---------------------------------------------------------------------------
 
+
 class Language(str, Enum):
     KRIO = "krio"
     MENDE = "mende"
@@ -34,18 +36,18 @@ class Language(str, Enum):
 
 
 class ValidationStatus(str, Enum):
-    UNVALIDATED = "unvalidated"          # raw, not yet reviewed
+    UNVALIDATED = "unvalidated"  # raw, not yet reviewed
     MACHINE_GENERATED = "machine_generated"  # produced by MT or TTS – NOT ground truth
     PARTIALLY_VALIDATED = "partially_validated"  # reviewed by one native speaker
-    VALIDATED = "validated"              # reviewed by ≥2 independent native speakers
-    REJECTED = "rejected"               # found to contain errors; do not use for training
+    VALIDATED = "validated"  # reviewed by ≥2 independent native speakers
+    REJECTED = "rejected"  # found to contain errors; do not use for training
 
 
 class DataSplit(str, Enum):
     TRAIN = "train"
     VALIDATION = "validation"
     TEST = "test"
-    HELD_OUT = "held_out"               # permanent evaluation set – never trained on
+    HELD_OUT = "held_out"  # permanent evaluation set – never trained on
 
 
 class LicenceType(str, Enum):
@@ -64,21 +66,23 @@ class LicenceType(str, Enum):
     UNKNOWN = "unknown"
 
 
-ALLOWED_LICENCE_IDS: frozenset[str] = frozenset({
-    "CC-BY-4.0",
-    "CC-BY-SA-4.0",
-    "CC-BY-NC-4.0",
-    "CC-BY-NC-SA-4.0",
-    "CC0-1.0",
-    "Apache-2.0",
-    "MIT",
-    "BSD-3-Clause",
-    "MPL-2.0",
-    "ODbL-1.0",
-    "proprietary",
-    "custom",
-    "unknown",
-})
+ALLOWED_LICENCE_IDS: frozenset[str] = frozenset(
+    {
+        "CC-BY-4.0",
+        "CC-BY-SA-4.0",
+        "CC-BY-NC-4.0",
+        "CC-BY-NC-SA-4.0",
+        "CC0-1.0",
+        "Apache-2.0",
+        "MIT",
+        "BSD-3-Clause",
+        "MPL-2.0",
+        "ODbL-1.0",
+        "proprietary",
+        "custom",
+        "unknown",
+    }
+)
 
 ConsentScope = Literal[
     "text_training",
@@ -104,6 +108,7 @@ _VALID_SPEAKER_ROLE_RE = re.compile(
 # Reviewer sign-off (SLAI-013: enforce dual native-speaker review)
 # ---------------------------------------------------------------------------
 
+
 class ReviewerSignoff(BaseModel):
     """Record of a single native-speaker reviewer's verdict on a dataset record."""
 
@@ -128,6 +133,7 @@ class ReviewerSignoff(BaseModel):
 # ---------------------------------------------------------------------------
 # Shared metadata (SLAI-013 / SLAI-025 / SLAI-028 / PA-011)
 # ---------------------------------------------------------------------------
+
 
 class DatasetMetadata(BaseModel):
     """Mandatory provenance and consent metadata attached to every dataset record."""
@@ -235,9 +241,7 @@ class DatasetMetadata(BaseModel):
     @classmethod
     def validate_licence_id(cls, v: str | None) -> str | None:
         if v is not None and v not in ALLOWED_LICENCE_IDS:
-            raise ValueError(
-                f"licence_id must be one of {sorted(ALLOWED_LICENCE_IDS)}, got '{v}'"
-            )
+            raise ValueError(f"licence_id must be one of {sorted(ALLOWED_LICENCE_IDS)}, got '{v}'")
         return v
 
     @model_validator(mode="after")
@@ -258,9 +262,7 @@ class DatasetMetadata(BaseModel):
 
         # Require licence_url when licence_id is custom or proprietary
         if self.licence_id in {"custom", "proprietary"} and not self.licence_url:
-            raise ValueError(
-                f"licence_url is required when licence_id is '{self.licence_id}'"
-            )
+            raise ValueError(f"licence_url is required when licence_id is '{self.licence_id}'")
 
         # Unknown rights must never be marked as permitted for training or redistribution
         if self.licence == LicenceType.UNKNOWN or self.licence_id == "unknown":
@@ -277,7 +279,8 @@ class DatasetMetadata(BaseModel):
         # VALIDATED requires ≥2 distinct native-speaker approvals (independent from contributor), consent=True, and known licence
         if self.validation_status == ValidationStatus.VALIDATED:
             native_approvals = [
-                r for r in self.reviews
+                r
+                for r in self.reviews
                 if r.is_native_speaker_of_record_language and r.verdict == "approve"
             ]
             reviewer_ids = {r.reviewer_id for r in native_approvals}
@@ -291,17 +294,14 @@ class DatasetMetadata(BaseModel):
                     f"Found {len(reviewer_ids)} qualifying reviewer(s)."
                 )
             if not self.contributor_consent:
-                raise ValueError(
-                    "ValidationStatus.VALIDATED requires contributor_consent=True."
-                )
+                raise ValueError("ValidationStatus.VALIDATED requires contributor_consent=True.")
             if self.licence == LicenceType.UNKNOWN or self.licence_id == "unknown":
-                raise ValueError(
-                    "ValidationStatus.VALIDATED cannot have an 'unknown' licence."
-                )
+                raise ValueError("ValidationStatus.VALIDATED cannot have an 'unknown' licence.")
         # PARTIALLY_VALIDATED requires ≥1 native-speaker approval (independent from contributor)
         elif self.validation_status == ValidationStatus.PARTIALLY_VALIDATED:
             native_approvals = [
-                r for r in self.reviews
+                r
+                for r in self.reviews
                 if r.is_native_speaker_of_record_language and r.verdict == "approve"
             ]
             reviewer_ids = {r.reviewer_id for r in native_approvals}
@@ -319,6 +319,7 @@ class DatasetMetadata(BaseModel):
 # ---------------------------------------------------------------------------
 # Text record schemas
 # ---------------------------------------------------------------------------
+
 
 class KrioTextRecord(BaseModel):
     """A single Krio text sample."""
@@ -511,6 +512,7 @@ class BenchmarkItem(BaseModel):
 # Audio record schemas (SLAI-026 / SLAI-028)
 # ---------------------------------------------------------------------------
 
+
 class AudioRecord(BaseModel):
     """Metadata for a single audio recording."""
 
@@ -558,15 +560,14 @@ class AudioRecord(BaseModel):
             )
         parts = PurePosixPath(cleaned.replace("\\", "/")).parts
         if ".." in parts:
-            raise ValueError(
-                f"Path traversal ('..') is forbidden in audio_file_path: '{v}'"
-            )
+            raise ValueError(f"Path traversal ('..') is forbidden in audio_file_path: '{v}'")
         return cleaned
 
     def resolve_audio_path(self, dataset_root: Path | None = None) -> Path:
         """Resolve audio_file_path safely under dataset_root (SLAI-028)."""
         if dataset_root is None:
             from sierraleone_ai.config import settings
+
             dataset_root = settings.data_dir
         root_resolved = dataset_root.resolve()
         target = (root_resolved / self.audio_file_path).resolve()
@@ -618,9 +619,7 @@ class VerifiedSpeechTranscriptionRecord(AudioRecord):
     @model_validator(mode="after")
     def verify_transcription_integrity(self) -> VerifiedSpeechTranscriptionRecord:
         if self.transcriber_id == self.verifier_id:
-            raise ValueError(
-                "transcriber_id and verifier_id must be two independent reviewers"
-            )
+            raise ValueError("transcriber_id and verifier_id must be two independent reviewers")
         if self.metadata.validation_status != ValidationStatus.VALIDATED:
             raise ValueError(
                 f"VerifiedSpeechTranscriptionRecord cannot have status "

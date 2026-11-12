@@ -5,6 +5,7 @@ The production `datasets/source_register.csv` must only contain real, human-revi
 rights decisions. Tests that need an APPROVED source use `TEST_APPROVED_SOURCE`, which
 is injected here at runtime and never written to the real register (PA-008).
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -31,4 +32,3 @@ def _inject_test_approved_source(monkeypatch: pytest.MonkeyPatch) -> Iterator[No
 
     monkeypatch.setattr(loader, "load_source_register", _patched)
     yield
-

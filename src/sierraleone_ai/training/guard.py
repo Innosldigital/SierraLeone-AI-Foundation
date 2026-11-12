@@ -15,6 +15,7 @@ Training requires ALL of:
 Supports `dry_run=True` which inspects and returns the full data/model/hardware plan
 while downloading nothing and starting nothing.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -39,8 +40,8 @@ _DEFAULT_MIN_RECORDS: dict[str, int] = {
     "translations": 10_000,
     "conversations": 1_000,
     "held_out_benchmark": 1_000,
-    "asr_audio": 1_000,            # verified ASR speech-transcript pairs
-    "tts_audio": 500,              # TTS recordings with voice_synthesis consent
+    "asr_audio": 1_000,  # verified ASR speech-transcript pairs
+    "tts_audio": 500,  # TTS recordings with voice_synthesis consent
 }
 
 # Readiness key -> training task counted in the dataset manifest (PA-001).
@@ -83,19 +84,6 @@ class ReadinessItem:
     def ok(self) -> bool:
         return self.have >= self.need
 
-    # Aliases used by test suite and CLI
-    @property
-    def name(self) -> str:
-        return self.key
-
-    @property
-    def ready(self) -> bool:
-        return self.ok
-
-    @property
-    def count(self) -> int:
-        return self.have
-
     def __str__(self) -> str:
         status = "✓" if self.ok else "✗"
         suffix = f" ({self.detail})" if self.detail else ""
@@ -117,9 +105,7 @@ class ModelLicenceReview(BaseModel):
     @model_validator(mode="after")
     def validate_commercial_permission(self) -> ModelLicenceReview:
         if self.intended_use == "commercial" and not self.commercial_permitted:
-            raise ValueError(
-                "commercial_permitted must be True when intended_use is 'commercial'"
-            )
+            raise ValueError("commercial_permitted must be True when intended_use is 'commercial'")
         return self
 
 
@@ -190,9 +176,7 @@ def verify_training_manifest(
     3. Dataset manifest exists, matches dataset_manifest_id, and covers all dataset files.
     """
     if not manifest_path.exists():
-        raise RuntimeError(
-            f"[TRAINING GUARD] Approval manifest file not found: {manifest_path}"
-        )
+        raise RuntimeError(f"[TRAINING GUARD] Approval manifest file not found: {manifest_path}")
     try:
         raw_data = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest = TrainingApprovalManifest(**raw_data)
@@ -340,7 +324,14 @@ def check_dataset_readiness(
         count_validated_benchmark_items(language),
         _MIN_RECORDS["held_out_benchmark"],
     )
-    order = ("cleaned_text", "translations", "conversations", "held_out_benchmark", "asr_audio", "tts_audio")
+    order = (
+        "cleaned_text",
+        "translations",
+        "conversations",
+        "held_out_benchmark",
+        "asr_audio",
+        "tts_audio",
+    )
     return {k: items[k] for k in order}
 
 
@@ -418,12 +409,9 @@ def require_training_approval(
         "selected_base_model": recommended.hf_repo if recommended else None,
         "held_out_integrity_ok": held_out_ok,
         "readiness": {
-            k: {"have": v.have, "need": v.need, "ok": v.ok}
-            for k, v in readiness.items()
+            k: {"have": v.have, "need": v.need, "ok": v.ok} for k, v in readiness.items()
         },
-        "eligible_counts": {
-            _READINESS_TASKS.get(k, k): v.have for k, v in readiness.items()
-        },
+        "eligible_counts": {_READINESS_TASKS.get(k, k): v.have for k, v in readiness.items()},
         "downloads": 0,
         "writes": 0,
         "gpu_available": gpu_available,

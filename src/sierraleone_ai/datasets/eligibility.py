@@ -4,6 +4,7 @@ Dataset eligibility evaluation (PA-002 / PA-003 / PA-008).
 Applies a single, fail-closed eligibility policy over validated Pydantic models.
 Never evaluates raw dicts.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,13 +39,13 @@ class EligibilityPolicy:
 
     task: Task = "text_training"
     split: str = "train"
-    validated_only: bool = True            # default to safe choice
+    validated_only: bool = True  # default to safe choice
     allow_partially_validated: bool = False
     include_machine_generated: bool = False
     require_consent: bool = True
-    enforce_source_register: bool = True   # allow-list (PA-008)
+    enforce_source_register: bool = True  # allow-list (PA-008)
     exclude_benchmark_overlap: bool = True
-    allow_templates: bool = False          # tests only
+    allow_templates: bool = False  # tests only
 
 
 def reasons_ineligible(
@@ -68,7 +69,10 @@ def reasons_ineligible(
         r.append("rejected")
 
     # 3. Machine generated status
-    if meta.validation_status is ValidationStatus.MACHINE_GENERATED and not policy.include_machine_generated:
+    if (
+        meta.validation_status is ValidationStatus.MACHINE_GENERATED
+        and not policy.include_machine_generated
+    ):
         r.append("machine_generated")
 
     # 4. Validated status
@@ -114,4 +118,3 @@ def reasons_ineligible(
         r.append("machine_only_translation")
 
     return r
-
