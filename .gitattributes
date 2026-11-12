@@ -1,0 +1,3 @@
+# Ensure denylist file always uses LF line endings across all OSes
+tests/krio_strings_denylist.txt text eol=lf
+*.sh text eol=lf
