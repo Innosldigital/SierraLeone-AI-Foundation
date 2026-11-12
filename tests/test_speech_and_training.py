@@ -10,6 +10,7 @@ from sierraleone_ai.datasets.schema import (
     AudioRecord,
     ConsentScope,
     DatasetMetadata,
+    DataSplit,
     Language,
     LicenceType,
     ReviewerSignoff,
@@ -26,7 +27,7 @@ def _make_reviewers(n: int = 2) -> list[ReviewerSignoff]:
     return [
         ReviewerSignoff(
             reviewer_id=f"TEST_REVIEWER_{i:02d}",
-            is_native_sl_krio_speaker=True,
+            is_native_speaker_of_record_language=True,
             reviewed_on=date(2024, 1, 1),
             verdict="approve",
         )
@@ -44,6 +45,7 @@ def _make_validated_metadata(**kwargs) -> DatasetMetadata:
         collection_date=date(2024, 1, 1),
         licence=LicenceType.CC_BY_4,
         validation_status=ValidationStatus.VALIDATED,
+        split=DataSplit.TRAIN,
         contributor_consent=True,
         consent_scope=_DEFAULT_CONSENT_SCOPE,
         reviews=_make_reviewers(2),

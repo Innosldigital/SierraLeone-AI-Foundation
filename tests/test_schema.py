@@ -12,6 +12,7 @@ from sierraleone_ai.datasets.schema import (
     ConversationRecord,
     ConversationTurn,
     DatasetMetadata,
+    DataSplit,
     KrioTextRecord,
     Language,
     LicenceType,
@@ -29,7 +30,7 @@ def _make_reviewers(n: int = 2) -> list[ReviewerSignoff]:
     return [
         ReviewerSignoff(
             reviewer_id=f"TEST_REVIEWER_{i:02d}",
-            is_native_sl_krio_speaker=True,
+            is_native_speaker_of_record_language=True,
             reviewed_on=date(2024, 1, 1),
             verdict="approve",
         )
@@ -51,6 +52,7 @@ def _make_metadata(**kwargs) -> DatasetMetadata:
         collection_date=date(2024, 1, 1),
         licence=LicenceType.CC_BY_4,
         validation_status=status,
+        split=DataSplit.TRAIN,
     )
     if status == ValidationStatus.VALIDATED:
         if "reviews" not in kwargs:
@@ -133,6 +135,66 @@ class TestDatasetMetadata:
             consent_scope=scope,
         )
         assert "text_training" in m.consent_scope
+
+    def test_metadata_defaults_fail_closed(self):
+        """PA-011: training_permitted and redistribution_permitted must default to False."""
+        m = _make_metadata()
+        assert m.schema_version == 2
+        assert m.training_permitted is False
+        assert m.redistribution_permitted is False
+
+    def test_custom_licence_without_flags_not_training_eligible(self):
+        """PA-011: custom licence without explicit flags defaults to training_permitted=False."""
+        m = _make_metadata(
+            licence=LicenceType.CUSTOM,
+            licence_id="custom",
+            licence_url="https://example.org/licence",
+        )
+        assert m.training_permitted is False
+        assert m.redistribution_permitted is False
+
+    def test_custom_licence_requires_licence_url(self):
+        """PA-011: custom/proprietary licence without licence_url raises ValueError."""
+        with pytest.raises(ValueError, match="licence_url is required"):
+            _make_metadata(licence=LicenceType.CUSTOM, licence_id="custom")
+
+    def test_licence_and_licence_id_contradiction_raises(self):
+        """PA-011: licence and licence_id contradiction raises ValueError."""
+        with pytest.raises(ValueError, match="contradict"):
+            _make_metadata(licence=LicenceType.CC_BY_4, licence_id="MIT")
+
+    def test_split_is_required_no_default(self):
+        """PA-011: split is required and has no default value."""
+        with pytest.raises(ValidationError):
+            DatasetMetadata(  # type: ignore[call-arg]
+                language=Language.KRIO,
+                source="test_source",
+                collection_date=date(2024, 1, 1),
+                licence=LicenceType.CC_BY_4,
+            )
+
+    def test_reviewer_cannot_be_contributor_for_approval(self):
+        """PA-011: Contributor cannot review their own work towards independent approvals."""
+        revs = [
+            ReviewerSignoff(
+                reviewer_id="CONTRIBUTOR_01",
+                is_native_speaker_of_record_language=True,
+                reviewed_on=date(2024, 1, 1),
+                verdict="approve",
+            ),
+            ReviewerSignoff(
+                reviewer_id="INDEPENDENT_02",
+                is_native_speaker_of_record_language=True,
+                reviewed_on=date(2024, 1, 1),
+                verdict="approve",
+            ),
+        ]
+        with pytest.raises(ValueError, match="independent of the contributor"):
+            _make_metadata(
+                validation_status=ValidationStatus.VALIDATED,
+                contributor_id="CONTRIBUTOR_01",
+                reviews=revs,
+            )
 
 
 class TestKrioTextRecord:
@@ -375,6 +437,23 @@ class TestVerifiedSpeechTranscriptionRecord:
                 ),
                 audio_file_path="krio/audio/spk_01/rec_01.wav",
                 transcript="TEST_FIXTURE_TRANSCRIPT_004",
+                speaker_id="spk_01",
+                transcriber_id="annotator_01",
+                verifier_id="annotator_02",
+            )
+
+    def test_speech_rejects_generic_training_consent_scope(self):
+        """PA-003 / PA-011: VerifiedSpeechTranscriptionRecord must reject legacy generic 'training' consent scope."""
+        with pytest.raises((ValidationError, ValueError), match="speech_recognition"):
+            VerifiedSpeechTranscriptionRecord(
+                metadata=_make_metadata(
+                    validation_status=ValidationStatus.VALIDATED,
+                    contributor_consent=True,
+                    consent_scope=["training"],
+                    reviews=_make_reviewers(2),
+                ),
+                audio_file_path="krio/audio/spk_01/rec_01.wav",
+                transcript="TEST_FIXTURE_TRANSCRIPT_005",
                 speaker_id="spk_01",
                 transcriber_id="annotator_01",
                 verifier_id="annotator_02",

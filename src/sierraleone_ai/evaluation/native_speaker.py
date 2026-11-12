@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import IntEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
 class LikertScore(IntEnum):
@@ -40,7 +40,9 @@ class KrioFluencyEvaluation(BaseModel):
     evaluation_id: str
     evaluator_id: str = Field(..., description="Anonymised evaluator identifier")
     evaluator_native_krio: bool = Field(
-        ..., description="Is the evaluator a native Sierra Leonean Krio speaker?"
+        ...,
+        validation_alias=AliasChoices("evaluator_native_krio", "evaluator_native_speaker"),
+        description="Is the evaluator a native Sierra Leonean Krio speaker?",
     )
     evaluation_date: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)

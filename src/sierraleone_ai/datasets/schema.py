@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -51,9 +51,14 @@ class DataSplit(str, Enum):
 class LicenceType(str, Enum):
     CC_BY_4 = "CC-BY-4.0"
     CC_BY_SA_4 = "CC-BY-SA-4.0"
+    CC_BY_NC_4 = "CC-BY-NC-4.0"
+    CC_BY_NC_SA_4 = "CC-BY-NC-SA-4.0"
     CC0 = "CC0-1.0"
     APACHE_2 = "Apache-2.0"
     MIT = "MIT"
+    BSD_3 = "BSD-3-Clause"
+    MPL_2 = "MPL-2.0"
+    ODBL_1 = "ODbL-1.0"
     PROPRIETARY = "proprietary"
     CUSTOM = "custom"
     UNKNOWN = "unknown"
@@ -62,9 +67,14 @@ class LicenceType(str, Enum):
 ALLOWED_LICENCE_IDS: frozenset[str] = frozenset({
     "CC-BY-4.0",
     "CC-BY-SA-4.0",
+    "CC-BY-NC-4.0",
+    "CC-BY-NC-SA-4.0",
     "CC0-1.0",
     "Apache-2.0",
     "MIT",
+    "BSD-3-Clause",
+    "MPL-2.0",
+    "ODbL-1.0",
     "proprietary",
     "custom",
     "unknown",
@@ -98,20 +108,31 @@ class ReviewerSignoff(BaseModel):
     """Record of a single native-speaker reviewer's verdict on a dataset record."""
 
     reviewer_id: str = Field(..., min_length=1, description="Anonymised reviewer identifier")
-    is_native_sl_krio_speaker: bool = Field(
-        ..., description="Must be True for VALIDATED status"
+    is_native_speaker_of_record_language: bool = Field(
+        ...,
+        validation_alias=AliasChoices(
+            "is_native_speaker_of_record_language",
+            "is_native_sl_krio_speaker",
+        ),
+        description="Must be True for VALIDATED status",
     )
     reviewed_on: date
     verdict: Literal["approve", "reject"]
+    notes: str | None = Field(default=None, description="Optional reviewer notes")
+
+    @property
+    def is_native_sl_krio_speaker(self) -> bool:
+        return self.is_native_speaker_of_record_language
 
 
 # ---------------------------------------------------------------------------
-# Shared metadata (SLAI-013 / SLAI-025 / SLAI-028)
+# Shared metadata (SLAI-013 / SLAI-025 / SLAI-028 / PA-011)
 # ---------------------------------------------------------------------------
 
 class DatasetMetadata(BaseModel):
     """Mandatory provenance and consent metadata attached to every dataset record."""
 
+    schema_version: Literal[2] = 2
     record_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     language: Language
     source: str = Field(
@@ -141,11 +162,11 @@ class DatasetMetadata(BaseModel):
         description="Date when the dataset or source material was acquired",
     )
     redistribution_permitted: bool = Field(
-        default=True,
+        default=False,
         description="True only if redistribution is legally permitted under the source licence",
     )
     training_permitted: bool = Field(
-        default=True,
+        default=False,
         description="True only if model training is permitted under the source licence and consent",
     )
     access_class: AccessClass = Field(
@@ -158,7 +179,11 @@ class DatasetMetadata(BaseModel):
     )
     validation_status: ValidationStatus = ValidationStatus.UNVALIDATED
     dataset_version: str = Field("0.1.0", pattern=r"^\d+\.\d+\.\d+$")
-    split: DataSplit = DataSplit.TRAIN
+    split: DataSplit
+    contributor_id: str | None = Field(
+        default=None,
+        description="Anonymised contributor identifier, needed to prove reviewer independence",
+    )
     contributor_consent: bool = Field(
         False,
         description="True if contributor has given explicit informed consent",
@@ -217,16 +242,27 @@ class DatasetMetadata(BaseModel):
 
     @model_validator(mode="after")
     def enforce_review_and_consent_rules(self) -> DatasetMetadata:
-        # Synchronise licence_id and licence
+        # Check licence consistency (if both given, must not contradict)
         if self.licence_id is None:
             self.licence_id = self.licence.value
-        elif self.licence == LicenceType.UNKNOWN and self.licence_id != "unknown":
-            for member in LicenceType:
-                if member.value == self.licence_id:
-                    self.licence = member
-                    break
+        else:
+            if self.licence != LicenceType.UNKNOWN and self.licence.value != self.licence_id:
+                raise ValueError(
+                    f"licence ('{self.licence.value}') and licence_id ('{self.licence_id}') contradict"
+                )
+            if self.licence == LicenceType.UNKNOWN and self.licence_id != "unknown":
+                for member in LicenceType:
+                    if member.value == self.licence_id:
+                        self.licence = member
+                        break
 
-        # Unknown rights must never be marked as permitted for training or redistribution (SLAI-025)
+        # Require licence_url when licence_id is custom or proprietary
+        if self.licence_id in {"custom", "proprietary"} and not self.licence_url:
+            raise ValueError(
+                f"licence_url is required when licence_id is '{self.licence_id}'"
+            )
+
+        # Unknown rights must never be marked as permitted for training or redistribution
         if self.licence == LicenceType.UNKNOWN or self.licence_id == "unknown":
             self.training_permitted = False
             self.redistribution_permitted = False
@@ -238,17 +274,20 @@ class DatasetMetadata(BaseModel):
                 "Specify what the contributor has consented to (e.g. ['text_training', 'speech_recognition'])."
             )
 
-        # VALIDATED requires ≥2 distinct native-speaker approvals, consent=True, and known licence
+        # VALIDATED requires ≥2 distinct native-speaker approvals (independent from contributor), consent=True, and known licence
         if self.validation_status == ValidationStatus.VALIDATED:
             native_approvals = [
                 r for r in self.reviews
-                if r.is_native_sl_krio_speaker and r.verdict == "approve"
+                if r.is_native_speaker_of_record_language and r.verdict == "approve"
             ]
             reviewer_ids = {r.reviewer_id for r in native_approvals}
+            if self.contributor_id and self.contributor_id in reviewer_ids:
+                reviewer_ids.discard(self.contributor_id)
+
             if len(reviewer_ids) < 2:
                 raise ValueError(
                     "ValidationStatus.VALIDATED requires reviews from ≥2 distinct native "
-                    "Sierra Leonean Krio speakers with verdict='approve'. "
+                    "speakers of the record language with verdict='approve' (independent of the contributor). "
                     f"Found {len(reviewer_ids)} qualifying reviewer(s)."
                 )
             if not self.contributor_consent:
@@ -259,16 +298,20 @@ class DatasetMetadata(BaseModel):
                 raise ValueError(
                     "ValidationStatus.VALIDATED cannot have an 'unknown' licence."
                 )
-        # PARTIALLY_VALIDATED requires ≥1 native-speaker approval
+        # PARTIALLY_VALIDATED requires ≥1 native-speaker approval (independent from contributor)
         elif self.validation_status == ValidationStatus.PARTIALLY_VALIDATED:
             native_approvals = [
                 r for r in self.reviews
-                if r.is_native_sl_krio_speaker and r.verdict == "approve"
+                if r.is_native_speaker_of_record_language and r.verdict == "approve"
             ]
-            if not native_approvals:
+            reviewer_ids = {r.reviewer_id for r in native_approvals}
+            if self.contributor_id and self.contributor_id in reviewer_ids:
+                reviewer_ids.discard(self.contributor_id)
+
+            if not reviewer_ids:
                 raise ValueError(
                     "ValidationStatus.PARTIALLY_VALIDATED requires at least 1 native "
-                    "Sierra Leonean Krio speaker review with verdict='approve'."
+                    "speaker review with verdict='approve' (independent of the contributor)."
                 )
         return self
 
@@ -514,7 +557,11 @@ class AudioRecord(BaseModel):
         if not target.exists() or not target.is_file():
             return False, f"audio_file_missing({self.audio_file_path})"
         if self.audio_sha256 is not None:
-            digest = hashlib.sha256(target.read_bytes()).hexdigest().lower()
+            h = hashlib.sha256()
+            with target.open("rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            digest = h.hexdigest().lower()
             if digest != self.audio_sha256.lower():
                 return False, "audio_sha256_mismatch"
         return True, ""
@@ -524,7 +571,7 @@ class VerifiedSpeechTranscriptionRecord(AudioRecord):
     """
     A verified audio-transcription pair for ASR/TTS training and evaluation.
     Enforces speaker_id presence (to prevent split leakage), dual human verification,
-    ValidationStatus.VALIDATED, and explicit ASR/training consent scope (SLAI-026).
+    ValidationStatus.VALIDATED, and explicit ASR consent scope (PA-003 / PA-011).
     """
 
     transcript: str = Field(..., min_length=1)
@@ -553,10 +600,8 @@ class VerifiedSpeechTranscriptionRecord(AudioRecord):
                 "Only ValidationStatus.VALIDATED is accepted — this requires ≥2 "
                 "independent native-speaker reviews recorded in metadata.reviews."
             )
-        asr_scopes = {"speech_recognition", "training"}
-        if not any(scope in asr_scopes for scope in self.metadata.consent_scope):
+        if "speech_recognition" not in self.metadata.consent_scope:
             raise ValueError(
-                "VerifiedSpeechTranscriptionRecord requires 'speech_recognition' "
-                "(or 'training') in metadata.consent_scope."
+                "VerifiedSpeechTranscriptionRecord requires 'speech_recognition' in metadata.consent_scope."
             )
         return self
