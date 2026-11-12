@@ -46,8 +46,8 @@ class TestKrioNormalizer:
         assert result.original == original
 
     def test_flags_nigerian_pidgin_markers_for_review_without_rejecting(self):
-        # SLAI-030: "abeg" and "oyibo" flag for human review, never auto-reject
-        result = self.normalizer.normalise("Abeg tell di oyibo man.")
+        # SLAI-030: "abeg" and "shey" flag for human review, never auto-reject
+        result = self.normalizer.normalise("Abeg tell that person, shey?")
         assert len(result.possible_cross_creole_overlap) >= 2
         assert result.flagged_non_krio_markers == result.possible_cross_creole_overlap
         assert result.needs_native_review is True
