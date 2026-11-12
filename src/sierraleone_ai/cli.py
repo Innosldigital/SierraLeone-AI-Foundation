@@ -200,6 +200,23 @@ def audit_tokenizer(
 
 
 @app.command()
+def serve(
+    host: str = typer.Option(None, help="Host to bind server (default from settings: 127.0.0.1)"),
+    port: int = typer.Option(None, help="Port to bind server (default from settings: 8000)"),
+    reload: bool = typer.Option(False, help="Enable auto-reload"),
+) -> None:
+    """Start the FastAPI application server (PA-014)."""
+    import uvicorn
+
+    from sierraleone_ai.config import settings
+
+    h = host or settings.api_host
+    p = port or settings.api_port
+    console.print(f"[bold green]Starting API server at http://{h}:{p}[/bold green]")
+    uvicorn.run("sierraleone_ai.api.app:app", host=h, port=p, reload=reload)
+
+
+@app.command()
 def status() -> None:
     """
     Show current project state across the 5 canonical levels:

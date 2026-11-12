@@ -108,3 +108,26 @@ class TestConfigSecrets:
                             f"but validation_status='validated'"
                         )
 
+    def test_relative_data_dir_resolves_against_project_root(self, monkeypatch):
+        """PA-014: Overridden relative data_dir resolves against project_root."""
+        monkeypatch.setenv("SLAI_DATA_DIR", "my_custom_datasets")
+        from sierraleone_ai.config import Settings
+        s = Settings()
+        assert s.data_dir.is_absolute()
+        assert str(s.data_dir).endswith("my_custom_datasets")
+
+    def test_cors_origins_parsed_from_json(self, monkeypatch):
+        """PA-014: SLAI_CORS_ORIGINS parses JSON list."""
+        monkeypatch.setenv("SLAI_CORS_ORIGINS", '["https://example.com", "https://app.example.com"]')
+        from sierraleone_ai.config import Settings
+        s = Settings()
+        assert s.cors_origins == ["https://example.com", "https://app.example.com"]
+
+    def test_cors_origins_empty_string(self, monkeypatch):
+        """PA-014: SLAI_CORS_ORIGINS empty string yields empty list."""
+        monkeypatch.setenv("SLAI_CORS_ORIGINS", "")
+        from sierraleone_ai.config import Settings
+        s = Settings()
+        assert s.cors_origins == []
+
+

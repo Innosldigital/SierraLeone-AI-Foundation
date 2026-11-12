@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
@@ -27,7 +28,7 @@ _DEFAULT_ROOT = Path(os.environ.get(
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SLAI_",
-        env_file=".env",
+        env_file=str(_DEFAULT_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -41,12 +42,40 @@ class Settings(BaseSettings):
     benchmarks_dir: Path = Field(default=_DEFAULT_ROOT / "benchmarks")
     logs_dir: Path = Field(default=_DEFAULT_ROOT / "logs")
 
+    @field_validator("data_dir", "models_dir", "benchmarks_dir", "logs_dir", mode="before")
+    @classmethod
+    def _resolve_path(cls, v: Any) -> Path:
+        p = Path(v)
+        if not p.is_absolute():
+            return _DEFAULT_ROOT / p
+        return p
+
     # API
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     api_debug: bool = False
-    cors_origins: list[str] = Field(default_factory=list)
+    cors_origins: list[str] | str = Field(default_factory=list)
     max_audio_upload_bytes: int = 10 * 1024 * 1024  # 10 MB default upload cap (SLAI-027)
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _parse_cors_origins(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    loaded = json.loads(v)
+                    if isinstance(loaded, list):
+                        return [str(x) for x in loaded]
+                except Exception:
+                    pass
+            return [x.strip() for x in v.split(",") if x.strip()]
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return []
 
     # Safety gate – prevents accidental expensive training
     allow_training: bool = False

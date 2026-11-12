@@ -146,3 +146,81 @@ def test_transcribe_rejects_oversized_upload(monkeypatch):
     )
     assert response.status_code == 413
 
+
+def test_translate_requires_english_on_exactly_one_side():
+    """PA-012: /translate requires English on exactly one side (422 otherwise)."""
+    # Neither side English -> 422
+    resp = client.post(
+        "/translate",
+        json={"text": "Hello", "source_language": "krio", "target_language": "mende"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "invalid_translation_pair"
+
+    # Both sides English -> 422
+    resp = client.post(
+        "/translate",
+        json={"text": "Hello", "source_language": "english", "target_language": "english"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "invalid_translation_pair"
+
+
+def test_generate_rejects_english():
+    """PA-012: /generate is for Sierra Leonean languages and rejects English with 422."""
+    resp = client.post(
+        "/generate",
+        json={"prompt": "FIXTURE_PROMPT_001", "language": "english"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "unsupported_language"
+
+
+def test_health_ready_state_based():
+    """PA-012: /health/ready returns 503 until model_state has loaded models, then 200."""
+    from sierraleone_ai.serving.state import model_state
+
+    model_state.reset()
+    resp = client.get("/health/ready")
+    assert resp.status_code == 503
+
+    model_state.register_model("chat_llm", "krio-llm-v1")
+    try:
+        resp = client.get("/health/ready")
+        assert resp.status_code == 200
+        assert "krio-llm-v1" in resp.json()["models_operational"]
+    finally:
+        model_state.reset()
+
+    resp = client.get("/health/ready")
+    assert resp.status_code == 503
+
+
+def test_transcribe_accepts_mp4_m4a_amr():
+    """PA-012: /transcribe accepts m4a and amr magic prefixes (returns 503 model not ready)."""
+    m4a_audio = io.BytesIO(b"\x00\x00\x00\x20ftypM4A ")
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("test.m4a", m4a_audio, "audio/x-m4a")},
+    )
+    assert resp.status_code == 503
+
+    amr_audio = io.BytesIO(b"#!AMR\n" + b"\x00" * 16)
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("test.amr", amr_audio, "audio/amr")},
+    )
+    assert resp.status_code == 503
+
+
+def test_transcribe_rejects_riff_non_wave():
+    """PA-012: RIFF file that is not WAVE (e.g. AVI/WEBP) is rejected with 400."""
+    non_wave = io.BytesIO(b"RIFF....AVI fmt ")
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("test.wav", non_wave, "audio/wav")},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "malformed_audio"
+
+

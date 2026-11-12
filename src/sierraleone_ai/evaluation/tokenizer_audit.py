@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from sierraleone_ai.config import settings
 from sierraleone_ai.datasets.constants import TEMPLATE_PREFIXES
 
 _TEMPLATE_PREFIXES = TEMPLATE_PREFIXES
@@ -74,7 +75,8 @@ def load_hf_tokenizer_only(tokenizer_id: str) -> TokenizerLike:
             "Tokenizer audit requires `transformers` (install via `pip install -e '.[training]'`)."
         ) from exc
 
-    return AutoTokenizer.from_pretrained(tokenizer_id, trust_remote_code=False)
+    tok = settings.hf_token.get_secret_value() or None
+    return AutoTokenizer.from_pretrained(tokenizer_id, trust_remote_code=False, token=tok)
 
 
 def audit_tokenizer_on_corpus(
