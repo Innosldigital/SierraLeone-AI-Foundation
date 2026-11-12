@@ -35,11 +35,38 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
 
 
 def _record(
-    source: str = "test_source",
-    status: str = "unvalidated",
+    source: str = "test_fixture_approved_source",
+    status: str | None = None,
     consent: bool = True,
     split: str = "train",
 ) -> dict:
+    if status is None:
+        status = "validated" if consent else "unvalidated"
+    reviews = []
+    if status == "validated":
+        reviews = [
+            {
+                "reviewer_id": "TEST_REV_01",
+                "is_native_speaker_of_record_language": True,
+                "reviewed_on": "2024-01-02",
+                "verdict": "approve",
+            },
+            {
+                "reviewer_id": "TEST_REV_02",
+                "is_native_speaker_of_record_language": True,
+                "reviewed_on": "2024-01-02",
+                "verdict": "approve",
+            },
+        ]
+    elif status == "partially_validated":
+        reviews = [
+            {
+                "reviewer_id": "TEST_REV_01",
+                "is_native_speaker_of_record_language": True,
+                "reviewed_on": "2024-01-02",
+                "verdict": "approve",
+            }
+        ]
     return {
         "metadata": {
             "record_id": "00000000-0000-0000-0000-000000000000",
@@ -47,11 +74,14 @@ def _record(
             "source": source,
             "collection_date": "2024-01-01",
             "licence": "CC-BY-4.0",
+            "licence_id": "CC-BY-4.0",
             "validation_status": status,
             "dataset_version": "0.1.0",
             "split": split,
             "contributor_consent": consent,
-            "consent_scope": ["training"] if consent else [],
+            "consent_scope": ["text_training"] if consent else [],
+            "training_permitted": True,
+            "reviews": reviews,
         },
         "text": "TEST_FIXTURE_TEXT_LOADER",
         "script": "Latin",
@@ -86,8 +116,13 @@ class TestApplyPolicy:
         assert skipped["no_consent"] == 1
 
     def test_no_consent_allowed_when_consent_not_required(self):
-        raw = [_record(consent=False, status="validated")]
-        admitted, _ = _apply_policy(raw, "train", LoadPolicy(require_consent=False), "test.jsonl")
+        raw = [_record(consent=False, status="unvalidated")]
+        admitted, _ = _apply_policy(
+            raw,
+            "train",
+            LoadPolicy(require_consent=False, validated_only=False),
+            "test.jsonl",
+        )
         assert len(admitted) == 1
 
     def test_template_records_excluded_by_default(self):
@@ -98,7 +133,12 @@ class TestApplyPolicy:
 
     def test_template_allowed_when_policy_permits(self):
         raw = [_record(source="SCHEMA_TEMPLATE_NOT_TRAINING_DATA", consent=False)]
-        admitted, _ = _apply_policy(raw, "train", LoadPolicy(allow_templates=True, require_consent=False), "test.jsonl")
+        admitted, _ = _apply_policy(
+            raw,
+            "train",
+            LoadPolicy(allow_templates=True, require_consent=False, validated_only=False),
+            "test.jsonl",
+        )
         assert len(admitted) == 1
 
     def test_split_mismatch_excluded(self):
@@ -117,7 +157,7 @@ class TestApplyPolicy:
         raw = [_record(status="machine_generated", consent=False)]
         admitted, _ = _apply_policy(
             raw, "train",
-            LoadPolicy(include_machine_generated=True, require_consent=False),
+            LoadPolicy(include_machine_generated=True, require_consent=False, validated_only=False),
             "test.jsonl",
         )
         assert len(admitted) == 1
@@ -189,7 +229,7 @@ class TestStrictAndPreviewLoad:
     def _valid_schema_dict(
         self,
         record_id: str = "11111111-1111-4111-8111-111111111111",
-        source: str = "community_approved_2024",
+        source: str = "test_fixture_approved_source",
         licence_id: str = "CC-BY-4.0",
         access_class: str = "public",
         redistribution_permitted: bool = True,
@@ -200,26 +240,26 @@ class TestStrictAndPreviewLoad:
                 "language": "krio",
                 "source": source,
                 "collection_date": "2024-01-01",
-                "licence": "CC-BY-4.0",
+                "licence": licence_id,
                 "licence_id": licence_id,
                 "validation_status": "validated",
                 "dataset_version": "0.1.0",
                 "split": "train",
                 "contributor_consent": True,
-                "consent_scope": ["training", "text_training"],
+                "consent_scope": ["text_training"],
                 "access_class": access_class,
                 "redistribution_permitted": redistribution_permitted,
                 "training_permitted": True,
                 "reviews": [
                     {
                         "reviewer_id": "TEST_REV_01",
-                        "is_native_sl_krio_speaker": True,
+                        "is_native_speaker_of_record_language": True,
                         "reviewed_on": "2024-01-02",
                         "verdict": "approve",
                     },
                     {
                         "reviewer_id": "TEST_REV_02",
-                        "is_native_sl_krio_speaker": True,
+                        "is_native_speaker_of_record_language": True,
                         "reviewed_on": "2024-01-02",
                         "verdict": "approve",
                     },
@@ -274,11 +314,85 @@ class TestStrictAndPreviewLoad:
         assert quarantine_file.exists()
 
     def test_unreviewed_source_in_register_blocked(self, tmp_path: Path, monkeypatch):
-        """SLAI-031: Sources marked UNREVIEWED in datasets/source_register.csv are blocked."""
+        """SLAI-031 / PA-008: Sources marked UNREVIEWED in datasets/source_register.csv are blocked."""
         rec = self._valid_schema_dict(source="jaward_krio_corpus")
         admitted, skipped = _apply_policy([rec], "train", LoadPolicy(), "test.jsonl")
         assert len(admitted) == 0
-        assert any("unreviewed_source_rights" in k for k in skipped)
+        assert any("source_rights_not_approved" in k or "unreviewed_source_rights" in k for k in skipped)
+
+    def test_source_not_in_register_excluded_and_approved_included(self):
+        """PA-008: Allow-list register excludes unknown source and admits APPROVED source."""
+        unknown = self._valid_schema_dict(source="completely_unknown_source_xyz")
+        approved = self._valid_schema_dict(
+            record_id="77777777-7777-4777-8777-777777777777",
+            source="test_fixture_approved_source",
+        )
+        admitted, skipped = _apply_policy([unknown, approved], "train", LoadPolicy(), "test.jsonl")
+        assert len(admitted) == 1
+        assert skipped["source_not_in_register"] == 1
+
+    def test_record_without_licence_or_training_permitted_not_eligible(self):
+        """PA-002: Record with no licence key / training_permitted=False -> rights_not_cleared."""
+        rec = self._valid_schema_dict()
+        rec["metadata"]["validation_status"] = "unvalidated"
+        rec["metadata"].pop("licence", None)
+        rec["metadata"].pop("licence_id", None)
+        rec["metadata"].pop("training_permitted", None)
+        admitted, skipped = _apply_policy(
+            [rec], "train", LoadPolicy(validated_only=False), "test.jsonl"
+        )
+        assert len(admitted) == 0
+        assert skipped["rights_not_cleared"] == 1
+
+    def test_consent_scope_missing_for_task(self):
+        """PA-003: licence=proprietary, consent_scope=['voice_synthesis'], task='text_training' -> consent_scope_missing(text_training)."""
+        rec = self._valid_schema_dict(licence_id="proprietary")
+        rec["metadata"]["licence_url"] = "https://example.org/licence"
+        rec["metadata"]["consent_scope"] = ["voice_synthesis"]
+        admitted, skipped = _apply_policy(
+            [rec],
+            "train",
+            LoadPolicy(task="text_training", split="train"),
+            "test.jsonl",
+        )
+        assert len(admitted) == 0
+        assert skipped["consent_scope_missing(text_training)"] == 1
+
+    def test_metadata_not_dict_in_strict_mode_raises_validation_error(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """PA-009a: metadata='x' in strict mode raises DataValidationError with line number, not AttributeError."""
+        import sierraleone_ai.config as cfg_module
+
+        krio_cleaned = tmp_path / "krio" / "cleaned"
+        krio_cleaned.mkdir(parents=True)
+        target = krio_cleaned / "krio_text_train.jsonl"
+        line1 = json.dumps(self._valid_schema_dict())
+        line2 = json.dumps({"metadata": "x", "text": "TEST_FIXTURE_TEXT"})
+        target.write_text(f"{line1}\n{line2}\n", encoding="utf-8")
+
+        monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
+
+        with pytest.raises(DataValidationError) as exc_info:
+            load_krio_text(split="train", strict=True)
+
+        assert exc_info.value.report.issues[0].line == 2
+
+    def test_utf8_bom_file_loads_cleanly(self, tmp_path: Path, monkeypatch):
+        """PA-009b: UTF-8-BOM file loads cleanly without JSONDecodeError."""
+        import sierraleone_ai.config as cfg_module
+
+        krio_cleaned = tmp_path / "krio" / "cleaned"
+        krio_cleaned.mkdir(parents=True)
+        target = krio_cleaned / "krio_text_train.jsonl"
+        payload = json.dumps(self._valid_schema_dict()).encode("utf-8")
+        target.write_bytes(b"\xef\xbb\xbf" + payload + b"\n")
+
+        monkeypatch.setattr(cfg_module.settings, "data_dir", tmp_path)
+
+        report = load_krio_text(split="train", strict=True)
+        assert len(report) == 1
+        assert len(report.issues) == 0
 
     def test_duplicate_record_id_blocked(self):
         """SLAI-028: Duplicate record_id values within a load are rejected."""
@@ -313,7 +427,7 @@ class TestStrictAndPreviewLoad:
             access_class="public",
             redistribution_permitted=True,
         )
-        pub_dict["metadata"]["consent_scope"] = ["training", "public_release"]
+        pub_dict["metadata"]["consent_scope"] = ["text_training", "public_release"]
         pub_rec = KrioTextRecord.model_validate(pub_dict)
         internal_rec = KrioTextRecord.model_validate(
             self._valid_schema_dict(

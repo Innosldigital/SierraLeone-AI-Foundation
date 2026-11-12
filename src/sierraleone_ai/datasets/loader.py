@@ -14,8 +14,12 @@ ELIGIBILITY RULES (enforced on every load)
 * Records with `consent_withdrawn=True` are always excluded.
 * Records with `licence='unknown'`, `licence_id='unknown'`, or `training_permitted=False`
   are excluded from training loads (SLAI-025).
-* Records whose source is listed in `datasets/source_register.csv` with a decision other
-  than `APPROVED` (e.g. `UNREVIEWED` or `REJECTED`) are excluded (SLAI-031).
+* Records whose source is NOT listed in `datasets/source_register.csv` with decision
+  `APPROVED` are excluded. The register is an allow-list; a missing register fails
+  closed (PA-008).
+* Records are parsed into validated Pydantic models BEFORE eligibility is evaluated;
+  eligibility never inspects raw dicts (PA-002). The task-specific consent scope must
+  be present (e.g. `text_training` for text loads, PA-003).
 * Records where `contributor_consent=False` are excluded unless `policy.require_consent=False`.
 * Records whose `split` field does not match the requested split are excluded.
 * Duplicate `record_id` values are excluded (SLAI-028).
@@ -46,9 +50,12 @@ from typing import Any, Generic, TypeVar, overload
 from loguru import logger
 
 from sierraleone_ai.config import settings
+from sierraleone_ai.datasets.constants import TEMPLATE_PREFIXES
+from sierraleone_ai.datasets.eligibility import EligibilityPolicy, reasons_ineligible
 from sierraleone_ai.datasets.schema import (
     AgriculturalConversationRecord,
     ConversationRecord,
+    DatasetMetadata,
     KrioTextRecord,
     LicenceType,
     TranslationRecord,
@@ -57,14 +64,9 @@ from sierraleone_ai.datasets.schema import (
 
 T = TypeVar("T")
 
-# ---------------------------------------------------------------------------
-# Template source prefix guard (Absolute Rule 1)
-# ---------------------------------------------------------------------------
-_TEMPLATE_PREFIXES = (
-    "SCHEMA_TEMPLATE",
-    "BENCHMARK_SCHEMA_TEMPLATE",
-    "EXAMPLE_PLACEHOLDER",
-)
+# Backward-compatible aliases
+LoadPolicy = EligibilityPolicy
+_TEMPLATE_PREFIXES = TEMPLATE_PREFIXES
 
 # PII patterns for consent store separation lint (SLAI-025)
 _EMAIL_PII_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
@@ -153,9 +155,10 @@ def load_source_register(register_path: Path | None = None) -> dict[str, dict[st
     """
     path = register_path or (settings.data_dir / "source_register.csv")
     if not path.exists():
+        # Fail closed: a missing register means no source is approved (PA-008).
         return {}
     register: dict[str, dict[str, str]] = {}
-    with path.open(encoding="utf-8", newline="") as f:
+    with path.open(encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             name = (row.get("source_name") or "").strip()
@@ -165,93 +168,55 @@ def load_source_register(register_path: Path | None = None) -> dict[str, dict[st
 
 
 # ---------------------------------------------------------------------------
-# Load policy
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class LoadPolicy:
-    """Controls which records are admitted during a dataset load."""
-
-    validated_only: bool = False
-    """True → only ValidationStatus.VALIDATED records (requires ≥2 native speaker reviews)."""
-
-    include_machine_generated: bool = False
-    """Allow machine_generated records (never use for supervised training ground truth)."""
-
-    require_consent: bool = True
-    """Exclude records where contributor_consent is False."""
-
-    allow_templates: bool = False
-    """Allow template/example records. Only for unit tests."""
-
-    exclude_benchmark_overlap: bool = True
-    """Exclude records whose text fingerprint appears in the held-out benchmark."""
-
-    enforce_source_register: bool = True
-    """Exclude sources listed as UNREVIEWED or REJECTED in datasets/source_register.csv."""
-
-
-# ---------------------------------------------------------------------------
 # Eligibility gate
 # ---------------------------------------------------------------------------
 
 def _is_eligible(
-    record_dict: dict[str, Any],
+    record_or_dict: dict[str, Any] | Any,
     split: str,
-    policy: LoadPolicy,
+    policy: EligibilityPolicy,
     source_register: dict[str, dict[str, str]] | None = None,
 ) -> tuple[bool, str]:
     """
     Return (eligible, skip_reason).
     skip_reason is "" when eligible.
     """
-    meta = record_dict.get("metadata", {})
-    source: str = meta.get("source", "")
-    status: str = meta.get("validation_status", "unvalidated")
-    consent: bool = meta.get("contributor_consent", False)
-    consent_withdrawn: bool = meta.get("consent_withdrawn", False)
-    licence: str = meta.get("licence", "CC-BY-4.0")
-    licence_id: str = meta.get("licence_id") or licence
-    training_permitted: bool = meta.get("training_permitted", True)
-    record_split: str = meta.get("split", "train")
+    meta: DatasetMetadata | None = None
+    rec: Any = None
+    meta_attr = getattr(record_or_dict, "metadata", None)
+    if isinstance(record_or_dict, DatasetMetadata):
+        meta = record_or_dict
+    elif isinstance(meta_attr, DatasetMetadata):
+        meta = meta_attr
+        rec = record_or_dict
+    elif isinstance(record_or_dict, dict):
+        rec = record_or_dict
+        meta_dict = record_or_dict.get("metadata", {})
+        if not isinstance(meta_dict, dict):
+            return False, "invalid_metadata"
+        try:
+            meta = DatasetMetadata.model_validate(meta_dict)
+        except Exception:
+            return False, "invalid_metadata"
+    else:
+        return False, "invalid_record"
 
-    # 1. Template guard
-    if not policy.allow_templates:
-        if source.upper().startswith(_TEMPLATE_PREFIXES):
-            return False, "template_record"
+    if policy.split != split:
+        policy = EligibilityPolicy(
+            task=policy.task,
+            split=split,
+            validated_only=policy.validated_only,
+            allow_partially_validated=policy.allow_partially_validated,
+            include_machine_generated=policy.include_machine_generated,
+            require_consent=policy.require_consent,
+            enforce_source_register=policy.enforce_source_register,
+            exclude_benchmark_overlap=policy.exclude_benchmark_overlap,
+            allow_templates=policy.allow_templates,
+        )
 
-    # 2. Never admit rejected records
-    if status == ValidationStatus.REJECTED.value:
-        return False, "rejected"
-
-    # 3. Machine generated
-    if status == ValidationStatus.MACHINE_GENERATED.value and not policy.include_machine_generated:
-        return False, "machine_generated"
-
-    # 4. Validated-only mode
-    if policy.validated_only and status != ValidationStatus.VALIDATED.value:
-        return False, f"not_validated({status})"
-
-    # 5. Source rights register check (SLAI-031)
-    if policy.enforce_source_register and source_register and source in source_register:
-        decision = source_register[source].get("decision", "UNREVIEWED").upper()
-        if decision != "APPROVED":
-            return False, f"unreviewed_source_rights({decision})"
-
-    # 6. Unknown licence or training_permitted=False (SLAI-025)
-    if licence == LicenceType.UNKNOWN.value or licence_id == "unknown" or not training_permitted:
-        return False, "unknown_or_unpermitted_rights"
-
-    # 7. Consent withdrawal & consent check
-    if consent_withdrawn:
-        return False, "consent_withdrawn"
-    if policy.require_consent and not consent:
-        return False, "no_consent"
-
-    # 8. Split mismatch
-    if record_split != split:
-        return False, f"split_mismatch({record_split}!={split})"
-
+    reasons = reasons_ineligible(meta, rec, policy, source_register)
+    if reasons:
+        return False, reasons[0]
     return True, ""
 
 
@@ -268,7 +233,7 @@ def _write_quarantine_issues(
     q_dir = settings.language_data_dir(language) / "quarantine"
     q_dir.mkdir(parents=True, exist_ok=True)
     out_path = q_dir / f"{source_path.stem}.issues.jsonl"
-    with out_path.open("w", encoding="utf-8") as f:
+    with out_path.open("w", encoding="utf-8-sig") as f:
         for issue in issues:
             f.write(json.dumps(issue.to_dict()) + "\n")
     return out_path
@@ -284,7 +249,7 @@ def _load_jsonl_with_issues(
     rows: list[tuple[int, dict[str, Any]]] = []
     issues: list[LoadIssue] = []
     total_lines = 0
-    with path.open(encoding="utf-8") as f:
+    with path.open(encoding="utf-8-sig") as f:
         for lineno, raw_line in enumerate(f, 1):
             line = raw_line.strip()
             if not line or line.startswith("#"):
@@ -339,25 +304,60 @@ def _load_jsonl(path: Path, *, strict: bool = False) -> list[dict[str, Any]]:
 
 
 def _apply_policy(
-    raw_records: list[dict[str, Any]],
+    raw_records: list[dict[str, Any] | Any],
     split: str,
-    policy: LoadPolicy,
+    policy: EligibilityPolicy,
     file_name: str,
     *,
     seen_ids: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], Counter[str]]:
-    """Filter raw dicts through the eligibility gate; return admitted records + skip counter."""
-    admitted: list[dict[str, Any]] = []
+) -> tuple[list[dict[str, Any] | Any], Counter[str]]:
+    """Filter raw dicts or models through the eligibility gate; return admitted records + skip counter."""
+    admitted: list[dict[str, Any] | Any] = []
     skipped: Counter[str] = Counter()
     source_reg = load_source_register() if policy.enforce_source_register else None
     tracked_ids = seen_ids if seen_ids is not None else set()
 
+    if policy.split != split:
+        policy = EligibilityPolicy(
+            task=policy.task,
+            split=split,
+            validated_only=policy.validated_only,
+            allow_partially_validated=policy.allow_partially_validated,
+            include_machine_generated=policy.include_machine_generated,
+            require_consent=policy.require_consent,
+            enforce_source_register=policy.enforce_source_register,
+            exclude_benchmark_overlap=policy.exclude_benchmark_overlap,
+            allow_templates=policy.allow_templates,
+        )
+
     for rec in raw_records:
-        ok, reason = _is_eligible(rec, split, policy, source_reg)
-        if not ok:
-            skipped[reason] += 1
+        meta: DatasetMetadata | None = None
+        if isinstance(rec, dict):
+            meta_dict = rec.get("metadata", {})
+            if not isinstance(meta_dict, dict):
+                skipped["invalid_metadata"] += 1
+                continue
+            try:
+                meta = DatasetMetadata.model_validate(meta_dict)
+            except Exception:
+                skipped["invalid_metadata"] += 1
+                continue
+        else:
+            rec_meta = getattr(rec, "metadata", None)
+            if isinstance(rec_meta, DatasetMetadata):
+                meta = rec_meta
+
+        if meta is None:
+            skipped["invalid_record"] += 1
             continue
-        rec_id = rec.get("metadata", {}).get("record_id")
+
+        reasons = reasons_ineligible(meta, rec, policy, source_reg)
+        if reasons:
+            for r in reasons:
+                skipped[r] += 1
+            continue
+
+        rec_id = str(meta.record_id) if meta.record_id else None
         if rec_id:
             if rec_id in tracked_ids:
                 skipped["duplicate_record_id"] += 1
@@ -369,7 +369,7 @@ def _apply_policy(
     n_skip = sum(skipped.values())
     if n_skip:
         logger.info(
-            f"{file_name}: {total - n_skip}/{total} records admitted; "
+            f"{file_name}: {len(admitted)}/{total} records admitted; "
             f"skipped: {dict(skipped)}"
         )
     return admitted, skipped
@@ -387,7 +387,7 @@ def scan_jsonl_for_pii(path: Path) -> list[LoadIssue]:
     issues: list[LoadIssue] = []
     if not path.exists():
         return issues
-    with path.open(encoding="utf-8") as f:
+    with path.open(encoding="utf-8-sig") as f:
         for lineno, line in enumerate(f, 1):
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
@@ -450,24 +450,36 @@ def export_for_release(records: Iterable[T]) -> list[T]:
 
 
 # ---------------------------------------------------------------------------
-# Public loaders (SLAI-001 / SLAI-007 / SLAI-022)
+# Public loaders (SLAI-001 / SLAI-007 / SLAI-022 / PA-002 / PA-009)
 # ---------------------------------------------------------------------------
 
 def load_jsonl_records(
     path: Path,
     model_cls: type[T],
     split: str = "train",
-    policy: LoadPolicy | None = None,
+    policy: EligibilityPolicy | None = None,
     *,
     strict: bool = True,
     language: str = "krio",
     write_quarantine: bool = False,
 ) -> LoadReport[T]:
     """
-    Generic strict/preview JSONL loader with line-level error reporting (SLAI-022).
+    Generic strict/preview JSONL loader with line-level error reporting (SLAI-022 / PA-002 / PA-009).
     """
     if policy is None:
-        policy = LoadPolicy()
+        policy = EligibilityPolicy(split=split)
+    elif policy.split != split:
+        policy = EligibilityPolicy(
+            task=policy.task,
+            split=split,
+            validated_only=policy.validated_only,
+            allow_partially_validated=policy.allow_partially_validated,
+            include_machine_generated=policy.include_machine_generated,
+            require_consent=policy.require_consent,
+            enforce_source_register=policy.enforce_source_register,
+            exclude_benchmark_overlap=policy.exclude_benchmark_overlap,
+            allow_templates=policy.allow_templates,
+        )
 
     if not path.exists():
         logger.warning(f"Dataset file not found: {path}")
@@ -488,34 +500,22 @@ def load_jsonl_records(
 
     records: list[T] = []
     for lineno, item in rows:
-        rec_id = item.get("metadata", {}).get("record_id") if isinstance(item.get("metadata"), dict) else None
-        ok, reason = _is_eligible(item, split, policy, source_reg)
-        if not ok:
-            skipped[reason] += 1
-            continue
-        if rec_id:
-            if rec_id in seen_ids:
-                skipped["duplicate_record_id"] += 1
-                continue
-            seen_ids.add(rec_id)
-
-        # Held-out benchmark overlap check (SLAI-007)
-        if bench_fps:
-            from sierraleone_ai.evaluation.benchmarks import text_fingerprint
-            candidate_texts = [
-                item.get("text"),
-                item.get("source_text"),
-                item.get("target_text"),
-            ]
-            if any(isinstance(t, str) and text_fingerprint(t) in bench_fps for t in candidate_texts):
-                skipped["benchmark_overlap"] += 1
-                continue
-
-        # Rule 7 for TranslationRecord: exclude machine_only
-        if model_cls is TranslationRecord and item.get("translation_method") == "machine_only":
-            skipped["machine_only_translation"] += 1
+        meta_raw = item.get("metadata")
+        if not isinstance(meta_raw, dict):
+            issues.append(
+                LoadIssue(
+                    path=str(path),
+                    line=lineno,
+                    record_id=None,
+                    error=f"Record metadata must be a JSON object, got {type(meta_raw).__name__}",
+                )
+            )
             continue
 
+        rec_id_raw = meta_raw.get("record_id")
+        rec_id_str = str(rec_id_raw) if rec_id_raw is not None else None
+
+        # 1. Parse into model first (PA-002 / PA-009a)
         try:
             if model_cls is ConversationRecord:
                 is_agri = (
@@ -530,17 +530,51 @@ def load_jsonl_records(
                 )
             else:
                 parsed_obj = model_cls(**item)
-            records.append(parsed_obj)
         except Exception as exc:
-            logger.warning(f"Schema validation failed in {path.name}:{lineno} (id={rec_id})")
+            logger.warning(f"Schema validation failed in {path.name}:{lineno} (id={rec_id_str})")
             issues.append(
                 LoadIssue(
                     path=str(path),
                     line=lineno,
-                    record_id=rec_id,
+                    record_id=rec_id_str,
                     error=str(exc),
                 )
             )
+            continue
+
+        # 2. Evaluate eligibility on validated model (PA-002 / PA-003 / PA-008)
+        parsed_meta = getattr(parsed_obj, "metadata", None)
+        if not isinstance(parsed_meta, DatasetMetadata):
+            issues.append(
+                LoadIssue(
+                    path=str(path),
+                    line=lineno,
+                    record_id=rec_id_str,
+                    error="Parsed record is missing valid DatasetMetadata",
+                )
+            )
+            continue
+        reasons = reasons_ineligible(parsed_meta, parsed_obj, policy, source_reg)
+        if reasons:
+            for r in reasons:
+                skipped[r] += 1
+            continue
+
+        # 3. Duplicate ID check
+        if rec_id_str:
+            if rec_id_str in seen_ids:
+                skipped["duplicate_record_id"] += 1
+                continue
+            seen_ids.add(rec_id_str)
+
+        # 4. Held-out benchmark overlap check on all text fields (PA-004)
+        if bench_fps:
+            from sierraleone_ai.evaluation.benchmarks import iter_texts, text_fingerprint
+            if any(text_fingerprint(t) in bench_fps for t in iter_texts(parsed_obj)):
+                skipped["benchmark_overlap"] += 1
+                continue
+
+        records.append(parsed_obj)
 
     if issues and write_quarantine:
         _write_quarantine_issues(path, issues, language=language)
@@ -564,9 +598,78 @@ def load_jsonl_records(
     return report
 
 
+def load_records(
+    language: str = "krio",
+    kind: str = "text",
+    split: str = "train",
+    policy: EligibilityPolicy | None = None,
+    *,
+    strict: bool = True,
+    write_quarantine: bool = False,
+    **kwargs: Any,
+) -> LoadReport[Any]:
+    """
+    Generic record loader across languages, splits, and record kinds (PA-002 / PA-021).
+    Supports kind in ('text', 'translations', 'conversations').
+    """
+    lang_dir = settings.language_data_dir(language)
+    if kind == "text":
+        path = lang_dir / "cleaned" / f"{language}_text_{split}.jsonl"
+        if not path.exists():
+            val_path = lang_dir / "validated" / f"{language}_text_{split}.jsonl"
+            if val_path.exists():
+                path = val_path
+        if policy is None:
+            policy = EligibilityPolicy(task="text_training", split=split)
+        return load_jsonl_records(
+            path,
+            KrioTextRecord,
+            split=split,
+            policy=policy,
+            strict=strict,
+            language=language,
+            write_quarantine=write_quarantine,
+        )
+    elif kind in ("translation", "translations"):
+        source_lang = kwargs.get("source_lang", "english")
+        target_lang = kwargs.get("target_lang", language)
+        fname = f"translations_{source_lang}_{target_lang}_{split}.jsonl"
+        path = settings.language_data_dir(target_lang) / "translations" / fname
+        if policy is None:
+            policy = EligibilityPolicy(task="translation_training", split=split)
+        return load_jsonl_records(
+            path,
+            TranslationRecord,
+            split=split,
+            policy=policy,
+            strict=strict,
+            language=target_lang,
+            write_quarantine=write_quarantine,
+        )
+    elif kind in ("conversation", "conversations"):
+        path = lang_dir / "conversations" / f"conversations_{split}.jsonl"
+        if policy is None:
+            policy = EligibilityPolicy(task="conversation_training", split=split)
+        report = load_jsonl_records(
+            path,
+            ConversationRecord,
+            split=split,
+            policy=policy,
+            strict=strict,
+            language=language,
+            write_quarantine=write_quarantine,
+        )
+        domain = kwargs.get("domain")
+        if domain:
+            report.records = [r for r in report.records if getattr(r, "domain", None) == domain]
+        return report
+    else:
+        raise ValueError(f"Unknown record kind: {kind}")
+
+
 def load_krio_text(
     split: str = "train",
-    policy: LoadPolicy | None = None,
+    policy: EligibilityPolicy | None = None,
     *,
     strict: bool = True,
     write_quarantine: bool = False,
@@ -575,14 +678,12 @@ def load_krio_text(
     Load Krio text records for a given split.
     Defaults to strict=True (raises DataValidationError on malformed lines).
     """
-    path = settings.krio_data_dir / "cleaned" / f"krio_text_{split}.jsonl"
-    return load_jsonl_records(
-        path,
-        KrioTextRecord,
+    return load_records(
+        language="krio",
+        kind="text",
         split=split,
         policy=policy,
         strict=strict,
-        language="krio",
         write_quarantine=write_quarantine,
     )
 
@@ -591,7 +692,7 @@ def load_translations(
     source_lang: str = "english",
     target_lang: str = "krio",
     split: str = "train",
-    policy: LoadPolicy | None = None,
+    policy: EligibilityPolicy | None = None,
     *,
     strict: bool = True,
     write_quarantine: bool = False,
@@ -600,16 +701,15 @@ def load_translations(
     Load parallel translation records.
     machine_only translations are always excluded regardless of policy (Rule 7).
     """
-    fname = f"translations_{source_lang}_{target_lang}_{split}.jsonl"
-    path = settings.language_data_dir(target_lang) / "translations" / fname
-    return load_jsonl_records(
-        path,
-        TranslationRecord,
+    return load_records(
+        language=target_lang,
+        kind="translations",
         split=split,
         policy=policy,
         strict=strict,
-        language=target_lang,
         write_quarantine=write_quarantine,
+        source_lang=source_lang,
+        target_lang=target_lang,
     )
 
 
@@ -617,7 +717,7 @@ def load_conversations(
     language: str = "krio",
     split: str = "train",
     domain: str | None = None,
-    policy: LoadPolicy | None = None,
+    policy: EligibilityPolicy | None = None,
     *,
     strict: bool = True,
     write_quarantine: bool = False,
@@ -626,19 +726,15 @@ def load_conversations(
     Load conversation records, optionally filtered by domain.
     Agricultural conversations are parsed as AgriculturalConversationRecord.
     """
-    path = settings.language_data_dir(language) / "conversations" / f"conversations_{split}.jsonl"
-    report = load_jsonl_records(
-        path,
-        ConversationRecord,
+    return load_records(
+        language=language,
+        kind="conversations",
         split=split,
         policy=policy,
         strict=strict,
-        language=language,
         write_quarantine=write_quarantine,
+        domain=domain,
     )
-    if domain:
-        report.records = [r for r in report.records if r.domain == domain]
-    return report
 
 
 # ---------------------------------------------------------------------------

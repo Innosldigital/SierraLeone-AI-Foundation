@@ -75,7 +75,7 @@ class TestCLI:
             "metadata": {
                 "record_id": "99999999-9999-4999-8999-999999999999",
                 "language": "krio",
-                "source": "community_approved_2024",
+                "source": "test_fixture_approved_source",
                 "collection_date": "2024-01-01",
                 "licence": "CC-BY-4.0",
                 "licence_id": "CC-BY-4.0",

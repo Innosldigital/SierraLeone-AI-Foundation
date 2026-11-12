@@ -23,13 +23,14 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
 from sierraleone_ai.config import settings
-from sierraleone_ai.datasets.loader import _TEMPLATE_PREFIXES
+from sierraleone_ai.datasets.constants import TEMPLATE_PREFIXES as _TEMPLATE_PREFIXES
 
 _SCHEMA_TEMPLATE_STEMS = ("held_out_eval_schema", "example_")
 
@@ -51,14 +52,51 @@ def text_fingerprint(text: str) -> str:
     return hashlib.sha256(_normalise_for_fingerprint(text).encode("utf-8")).hexdigest()
 
 
+def iter_texts(obj: Any) -> Iterator[str]:
+    """
+    Iterate over all text-bearing fields in a record (dict or model).
+    Used for benchmark extraction, contamination detection, and data loading checks.
+    """
+    if hasattr(obj, "model_dump"):
+        d = obj.model_dump()
+    elif isinstance(obj, dict):
+        d = obj
+    else:
+        d = getattr(obj, "__dict__", {})
+
+    for k in (
+        "text",
+        "source_text",
+        "target_text",
+        "question",
+        "answer",
+        "transcript",
+        "prompt",
+        "reference",
+        "references",
+    ):
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            yield v
+        elif isinstance(v, list):
+            for x in v:
+                if isinstance(x, str) and x.strip():
+                    yield x
+    for t in d.get("turns", []) or []:
+        if isinstance(t, dict) and isinstance(t.get("text"), str) and t["text"].strip():
+            yield t["text"]
+        elif hasattr(t, "text") and isinstance(t.text, str) and t.text.strip():
+            yield t.text
+
+
 def _is_template_record(source: str) -> bool:
     return source.upper().startswith(_TEMPLATE_PREFIXES)
 
 
 def _extract_texts_from_jsonl(path: Path) -> list[str]:
-    """Extract the primary text field(s) from a JSONL benchmark file."""
+    """Extract all text fields from a JSONL benchmark file."""
     texts: list[str] = []
-    with path.open(encoding="utf-8") as f:
+    with path.open(encoding="utf-8-sig") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -68,11 +106,8 @@ def _extract_texts_from_jsonl(path: Path) -> list[str]:
                 meta = rec.get("metadata", {})
                 if _is_template_record(meta.get("source", "")):
                     continue
-                # Support multiple record types
-                for field in ("text", "source_text", "target_text", "question", "answer", "transcript"):
-                    val = rec.get(field)
-                    if isinstance(val, str) and val:
-                        texts.append(val)
+                for t in iter_texts(rec):
+                    texts.append(t)
             except (json.JSONDecodeError, KeyError):
                 continue
     return texts
