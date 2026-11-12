@@ -60,14 +60,21 @@ class TestConfigSecrets:
         """SLAI-015: [project.optional-dependencies] groups training, audio, eval, data, dev are non-empty."""
         from pathlib import Path
 
-        import tomllib
-
         pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
-        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-        opt_deps = data["project"]["optional-dependencies"]
-        for group in ("training", "audio", "eval", "data", "dev"):
-            assert group in opt_deps, f"Missing optional-dependencies group '{group}'"
-            assert len(opt_deps[group]) >= 1, f"Optional dependency group '{group}' is empty"
+        try:
+            import tomllib
+
+            data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+            opt_deps = data["project"]["optional-dependencies"]
+            for group in ("training", "audio", "eval", "data", "dev"):
+                assert group in opt_deps, f"Missing optional-dependencies group '{group}'"
+                assert len(opt_deps[group]) >= 1, f"Optional dependency group '{group}' is empty"
+        except ModuleNotFoundError:
+            # Fallback for Python 3.10 where tomllib is not in the standard library
+            text = pyproject_path.read_text(encoding="utf-8")
+            assert "[project.optional-dependencies]" in text
+            for group in ("training", "audio", "eval", "data", "dev"):
+                assert f"{group} = [" in text, f"Missing optional-dependencies group '{group}'"
 
     def test_language_registry_matches_schema_enum_and_benchmark_dirs(self):
         """SLAI-028 / SLAI-018: Single language registry matches Language enum and lowercase benchmark dirs."""
